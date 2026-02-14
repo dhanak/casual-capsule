@@ -1,0 +1,13 @@
+services:
+  cli:
+    build: .
+    environment:
+      - GITHUB_TOKEN
+      - OPENAI_BASE_URL
+      - OPENAI_API_KEY
+    restart: unless-stopped
+    volumes:
+      - /Users/b/Work/TEMP:/mnt/TEMP
+      - /Users/b/.codex:/home/b/.codex
+      - /Users/b/.config/gh:/home/b/.config/gh
+      - /Users/b/.local/share/gh:/home/b/.local/share/gh
