@@ -48,8 +48,7 @@ RUN mise install
 RUN mise use -g golang@1.26
 
 # Install Codex
-RUN npm install -g npm@11.4.0
-RUN npm install -g @openai/codex open-codex openai
+RUN npm install -g @openai/codex open-codex
 
 # Install Copilot and vim extension
 RUN npm install -g @github/copilot

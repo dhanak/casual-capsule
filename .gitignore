@@ -1,0 +1,4 @@
+# Ignore self-managed .codex.txt to remember previous sessions
+/.codex.txt
+/.copilot.txt
+/.claude.txt
