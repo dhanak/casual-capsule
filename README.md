@@ -11,6 +11,7 @@ common developer tools.
   runs as `8888:100`, and adds Docker socket access via `DOCKER_GID`.
 - `capsule.sh`: Launcher script for running the CLI from any project
   directory.
+- `tests/test_capsule.sh`: Bash test suite for launcher and Compose contract.
 
 ## Prerequisites
 
@@ -113,6 +114,16 @@ docker compose run --rm cli docker ps
 
 Note: the injected Docker group may appear as a numeric GID inside the
 container if no matching group name exists in `/etc/group`.
+
+### 5. Run tests
+
+From this repo:
+
+```bash
+./tests/test_capsule.sh
+```
+
+The tests use command stubs, so they do not require a running Docker daemon.
 
 ## Security Note
 
