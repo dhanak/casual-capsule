@@ -6,11 +6,18 @@ export CAPSULE_WORKDIR="${CAPSULE_WORKDIR:-${CC_WORKDIR:-$(pwd -P)}}"
 
 if [[ -z "${DOCKER_GID:-}" ]]; then
   DOCKER_SOCK_PATH=""
+  DOCKER_HOST_SOCK_PATH=""
+
   if [[ -n "${DOCKER_HOST:-}" ]] && [[ "${DOCKER_HOST}" == unix://* ]]; then
-    DOCKER_SOCK_PATH="${DOCKER_HOST#unix://}"
-  elif [[ -e /var/run/docker.sock ]]; then
+    DOCKER_HOST_SOCK_PATH="${DOCKER_HOST#unix://}"
+    if [[ -e "${DOCKER_HOST_SOCK_PATH}" ]]; then
+      DOCKER_SOCK_PATH="${DOCKER_HOST_SOCK_PATH}"
+    fi
+  fi
+
+  if [[ -z "${DOCKER_SOCK_PATH}" ]] && [[ -e /var/run/docker.sock ]]; then
     DOCKER_SOCK_PATH="/var/run/docker.sock"
-  elif command -v docker >/dev/null 2>&1; then
+  elif [[ -z "${DOCKER_SOCK_PATH}" ]] && command -v docker >/dev/null 2>&1; then
     CONTEXT_HOST="$(docker context inspect \
       --format '{{(index .Endpoints "docker").Host}}' 2>/dev/null || true)"
     if [[ "${CONTEXT_HOST}" == unix://* ]]; then
@@ -28,9 +35,12 @@ if [[ -z "${DOCKER_GID:-}" ]]; then
     )"; then
       export DOCKER_GID="${DOCKER_GID_VALUE}"
     else
-      DOCKER_GID_VALUE="$(ls -ln "${DOCKER_SOCK_PATH}" | awk '{print $4}')"
-      if [[ -n "${DOCKER_GID_VALUE}" ]]; then
-        export DOCKER_GID="${DOCKER_GID_VALUE}"
+      if DOCKER_GID_VALUE="$(
+        ls -ln "${DOCKER_SOCK_PATH}" 2>/dev/null | awk '{print $4}'
+      )"; then
+        if [[ -n "${DOCKER_GID_VALUE}" ]]; then
+          export DOCKER_GID="${DOCKER_GID_VALUE}"
+        fi
       fi
     fi
   fi

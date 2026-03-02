@@ -86,7 +86,16 @@ set -euo pipefail
 printf '%s\n' "${MOCK_UNAME:-Linux}"
 EOF
 
-  chmod +x "$dir/docker" "$dir/stat" "$dir/uname"
+  cat >"$dir/ls" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${MOCK_LS_FAIL:-}" ]] || [[ -n "${MOCK_STAT_FAIL:-}" ]]; then
+  exit 1
+fi
+/bin/ls "$@"
+EOF
+
+  chmod +x "$dir/docker" "$dir/stat" "$dir/uname" "$dir/ls"
 }
 
 run_capsule() {
@@ -151,14 +160,18 @@ test_workdir_precedence() {
 
   : >"$log_file"
   local pwd_case="$tdir/pwd-case"
+  local expected_pwd_case=""
   mkdir -p "$pwd_case"
   (
     cd "$pwd_case"
+    expected_pwd_case="$(pwd -P)"
     DOCKER_GID=1111 PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" \
       "$SCRIPT_PATH" true
+    printf '%s\n' "$expected_pwd_case" >"$tdir/expected_pwd_case"
   )
+  expected_pwd_case="$(cat "$tdir/expected_pwd_case")"
   assert_equals \
-    "$pwd_case" \
+    "$expected_pwd_case" \
     "$(value_from_log ENV_CAPSULE_WORKDIR "$log_file")" \
     "current directory is fallback when workdir vars are unset"
 }
@@ -177,6 +190,23 @@ test_linux_gid_autodetect_from_docker_host() {
 
   assert_equals "5678" "$(value_from_log ENV_DOCKER_GID "$log_file")" \
     "Linux path auto-detects DOCKER_GID from socket"
+}
+
+test_bad_docker_host_falls_back_to_context_socket() {
+  local tdir="$TEST_TMPDIR/context-fallback"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  local sock_path="$tdir/context.sock"
+  mkdir -p "$tdir"
+  make_mock_bin "$mock_bin"
+  : >"$sock_path"
+
+  DOCKER_GID= DOCKER_HOST="unix://$tdir/missing.sock" \
+    MOCK_CONTEXT_HOST="unix://$sock_path" MOCK_STAT_GID=6789 \
+    run_capsule "$mock_bin" "$log_file" true
+
+  assert_equals "6789" "$(value_from_log ENV_DOCKER_GID "$log_file")" \
+    "capsule ignores unusable DOCKER_HOST and falls back to context"
 }
 
 test_macos_staff_gid_override() {
@@ -226,6 +256,7 @@ main() {
   test_explicit_docker_gid_passthrough
   test_workdir_precedence
   test_linux_gid_autodetect_from_docker_host
+  test_bad_docker_host_falls_back_to_context_socket
   test_macos_staff_gid_override
   test_default_gid_when_detection_fails
 
