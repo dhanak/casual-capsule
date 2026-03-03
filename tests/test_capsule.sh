@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 SCRIPT_PATH="$ROOT_DIR/capsule.sh"
 COMPOSE_PATH="$ROOT_DIR/compose.yml"
+DOCKERFILE_PATH="$ROOT_DIR/Dockerfile"
 
 TEST_TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TEST_TMPDIR"' EXIT
@@ -133,6 +134,20 @@ test_compose_contract() {
   assert_file_contains "$COMPOSE_PATH" \
     '${CAPSULE_WORKDIR:-${CC_WORKDIR:-${PWD}}}:/home/workspace' \
     "compose keeps CAPSULE_WORKDIR with compatibility fallback"
+}
+
+test_dockerfile_tooling_contract() {
+  assert_file_contains "$DOCKERFILE_PATH" 'fd-find' \
+    "image installs fd-find"
+  assert_file_contains "$DOCKERFILE_PATH" 'ripgrep' \
+    "image installs ripgrep for rg"
+  assert_file_contains "$DOCKERFILE_PATH" 'jq' \
+    "image installs jq for JSON inspection"
+  assert_file_contains "$DOCKERFILE_PATH" 'shellcheck' \
+    "image installs shellcheck for shell linting"
+  assert_file_contains "$DOCKERFILE_PATH" \
+    'ln -sf /usr/bin/fdfind /usr/local/bin/fd' \
+    "image exposes fd command name via fdfind symlink"
 }
 
 test_build_flag_runs_build_then_runtime() {
@@ -352,6 +367,7 @@ main() {
   fi
 
   test_compose_contract
+  test_dockerfile_tooling_contract
   test_build_flag_runs_build_then_runtime
   test_double_dash_keeps_runtime_flags
   test_build_flag_without_runtime_args

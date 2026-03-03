@@ -21,7 +21,9 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     docker-buildx-plugin docker-ce-cli docker-compose-plugin \
-    ca-certificates curl git gnupg sudo vim less && \
+    ca-certificates curl fd-find git gnupg jq less ripgrep shellcheck \
+    sudo vim && \
+    ln -sf /usr/bin/fdfind /usr/local/bin/fd && \
     rm -rf /var/lib/apt/lists/*
 
 # Add user

@@ -6,7 +6,8 @@ common developer tools.
 ## What is in this repo
 
 - `Dockerfile`: Main image based on `jdxcode/mise` with Node, Go, npm,
-  Codex, OpenAI CLI, Docker CLI, Compose plugin, and Copilot CLI.
+  Codex, OpenAI CLI, Docker CLI, Compose plugin, Copilot CLI, and agent
+  utilities (`rg`, `fd`, `jq`, `shellcheck`).
 - `compose.yml`: Local compose service (`cli`) that builds from `Dockerfile`,
   runs as `8888:100`, and adds Docker socket access via `DOCKER_GID`.
 - `capsule.sh`: Launcher script for running the CLI from any project
@@ -146,6 +147,22 @@ From this repo:
 ```
 
 The tests use command stubs, so they do not require a running Docker daemon.
+
+### 6. Included agent tooling
+
+The image includes utilities commonly used by coding agents:
+
+- `rg` (`ripgrep`) for fast content search
+- `fd` (`fdfind`) for fast file discovery
+- `jq` for JSON filtering and inspection
+- `shellcheck` for shell script linting
+
+Verify inside capsule:
+
+```bash
+capsule bash -lc "rg --version && fd --version && jq --version && \
+  shellcheck --version"
+```
 
 ## Security Note
 
