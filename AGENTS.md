@@ -41,6 +41,6 @@
 7. Keep the CLI user as `8888:100` and inject host Docker GID with
    `DOCKER_GID` + Compose `group_add`.
 8. Keep baseline agent utilities installed in the image: `rg`, `fd`, `jq`,
-   and `shellcheck`.
+   `shellcheck`, `gh`, and `tree`.
 9. When changing Dockerfile tool packages, update README tooling docs and
    tests to keep the tooling contract explicit.

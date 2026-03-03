@@ -148,6 +148,10 @@ test_dockerfile_tooling_contract() {
   assert_file_contains "$DOCKERFILE_PATH" \
     'ln -sf /usr/bin/fdfind /usr/local/bin/fd' \
     "image exposes fd command name via fdfind symlink"
+  assert_file_contains "$DOCKERFILE_PATH" 'gh' \
+    "image installs gh for GitHub CLI"
+  assert_file_contains "$DOCKERFILE_PATH" 'tree' \
+    "image installs tree for directory visualization"
 }
 
 test_build_flag_runs_build_then_runtime() {

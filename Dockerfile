@@ -16,13 +16,21 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
     "signed-by=/etc/apt/keyrings/docker.gpg] " \
     "https://download.docker.com/linux/${DISTRO_ID} " \
     "${DISTRO_CODENAME} stable" \
-    > /etc/apt/sources.list.d/docker.list
+    > /etc/apt/sources.list.d/docker.list && \
+    curl -fsSL \
+    https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    -o /etc/apt/keyrings/github-cli.gpg && \
+    chmod a+r /etc/apt/keyrings/github-cli.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) " \
+    "signed-by=/etc/apt/keyrings/github-cli.gpg] " \
+    "https://cli.github.com/packages stable main" \
+    > /etc/apt/sources.list.d/github-cli.list
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     docker-buildx-plugin docker-ce-cli docker-compose-plugin \
-    ca-certificates curl fd-find git gnupg jq less ripgrep shellcheck \
-    sudo vim && \
+    ca-certificates curl fd-find gh git gnupg jq less ripgrep \
+    shellcheck sudo tree vim && \
     ln -sf /usr/bin/fdfind /usr/local/bin/fd && \
     rm -rf /var/lib/apt/lists/*
 

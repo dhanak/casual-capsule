@@ -7,7 +7,7 @@ common developer tools.
 
 - `Dockerfile`: Main image based on `jdxcode/mise` with Node, Go, npm,
   Codex, OpenAI CLI, Docker CLI, Compose plugin, Copilot CLI, and agent
-  utilities (`rg`, `fd`, `jq`, `shellcheck`).
+  utilities (`rg`, `fd`, `jq`, `shellcheck`, `gh`, `tree`).
 - `compose.yml`: Local compose service (`cli`) that builds from `Dockerfile`,
   runs as `8888:100`, and adds Docker socket access via `DOCKER_GID`.
 - `capsule.sh`: Launcher script for running the CLI from any project
@@ -156,12 +156,14 @@ The image includes utilities commonly used by coding agents:
 - `fd` (`fdfind`) for fast file discovery
 - `jq` for JSON filtering and inspection
 - `shellcheck` for shell script linting
+- `gh` for GitHub CLI operations
+- `tree` for directory structure visualization
 
 Verify inside capsule:
 
 ```bash
 capsule bash -lc "rg --version && fd --version && jq --version && \
-  shellcheck --version"
+  shellcheck --version && gh --version && tree --version"
 ```
 
 ## Security Note
