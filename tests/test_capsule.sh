@@ -117,7 +117,7 @@ test_compose_contract() {
   assert_file_contains "$COMPOSE_PATH" '- "${DOCKER_GID:-999}"' \
     "compose injects Docker group from DOCKER_GID"
   assert_file_contains "$COMPOSE_PATH" \
-    '${CAPSULE_WORKDIR:-${CC_WORKDIR:-${PWD}}}:/workspace' \
+    '${CAPSULE_WORKDIR:-${CC_WORKDIR:-${PWD}}}:/home/workspace' \
     "compose keeps CAPSULE_WORKDIR with compatibility fallback"
 }
 

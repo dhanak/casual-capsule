@@ -1,0 +1,6 @@
+# Do not expose project specific files
+/AGENTS.md
+/README.md
+/capsule.sh
+/compose.yml
+/tests

@@ -3,7 +3,7 @@
 #------------------------------------------------------------------------------
 FROM jdxcode/mise:2026.3 AS runtime
 
-WORKDIR /app
+WORKDIR /home/workspace
 
 RUN install -m 0755 -d /etc/apt/keyrings && \
     . /etc/os-release && \
@@ -35,6 +35,9 @@ RUN echo 'eval "$(mise activate bash)"' >> /etc/profile
 
 # Switch user
 USER user
+
+# Use a common AGENTS.md in the direct parent of `workspace`
+COPY docker/AGENTS.md /home/
 
 # Install nodejs
 RUN mise use -g node@24

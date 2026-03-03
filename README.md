@@ -31,10 +31,10 @@ docker build -t casual-capsule:latest .
 docker run --rm -it \
   -e DOCKER_HOST=unix:///var/run/docker.sock \
   -e DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)" \
-  -w /workspace \
+  -w /home/workspace \
   --user 8888:100 \
   --group-add "${DOCKER_GID}" \
-  -v "$PWD:/workspace" \
+  -v "$PWD:/home/workspace" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   casual-capsule:latest
 ```
