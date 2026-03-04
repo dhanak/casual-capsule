@@ -34,3 +34,9 @@
 4. Keep secrets in runtime environment or secret managers, never hardcoded.
 5. For interactive shells, do not use auto-restart policies.
 6. For Docker socket access, support Linux and macOS group-ID differences.
+
+## Go Conventions
+
+1. Keep the `main` package small and focused.
+2. Prefer standard library usage unless external dependencies are needed.
+3. Run `go test ./...` when tests are present.
