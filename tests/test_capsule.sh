@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)"
 SCRIPT_PATH="$ROOT_DIR/capsule.sh"
 COMPOSE_PATH="$ROOT_DIR/compose.yml"
 DOCKERFILE_PATH="$ROOT_DIR/Dockerfile"
@@ -116,8 +116,11 @@ EOF
 run_capsule() {
   local mock_bin="$1"
   local log_file="$2"
+  local cfg_file="${TEST_TMPDIR}/config"
   shift 2
-  PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" "$SCRIPT_PATH" "$@"
+  echo "${CAPSULE_WORKDIR:-${CC_WORKDIR:-${PWD}}}" >"${cfg_file}"
+  PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" CAPSULE_CONFIG="$cfg_file" \
+      "$SCRIPT_PATH" "$@"
 }
 
 value_from_log() {
@@ -126,8 +129,9 @@ value_from_log() {
   grep -F "$key=" "$log_file" | tail -n1 | cut -d= -f2-
 }
 
+# shellcheck disable=SC2016
 test_compose_contract() {
-  assert_file_contains "$COMPOSE_PATH" 'user: "8888:100"' \
+  assert_file_contains "$COMPOSE_PATH" 'user: "1000:1000"' \
     "compose keeps primary user/group fixed"
   assert_file_contains "$COMPOSE_PATH" '- "${DOCKER_GID:-999}"' \
     "compose injects Docker group from DOCKER_GID"
@@ -137,21 +141,14 @@ test_compose_contract() {
 }
 
 test_dockerfile_tooling_contract() {
-  assert_file_contains "$DOCKERFILE_PATH" 'fd-find' \
-    "image installs fd-find"
-  assert_file_contains "$DOCKERFILE_PATH" 'ripgrep' \
-    "image installs ripgrep for rg"
-  assert_file_contains "$DOCKERFILE_PATH" 'jq' \
-    "image installs jq for JSON inspection"
   assert_file_contains "$DOCKERFILE_PATH" 'shellcheck' \
     "image installs shellcheck for shell linting"
-  assert_file_contains "$DOCKERFILE_PATH" \
-    'ln -sf /usr/bin/fdfind /usr/local/bin/fd' \
-    "image exposes fd command name via fdfind symlink"
-  assert_file_contains "$DOCKERFILE_PATH" 'gh' \
-    "image installs gh for GitHub CLI"
   assert_file_contains "$DOCKERFILE_PATH" 'tree' \
     "image installs tree for directory visualization"
+  assert_file_contains "$DOCKERFILE_PATH" 'https://mise.run' \
+    "image installs mise"
+  assert_file_contains "$DOCKERFILE_PATH" '/mise/config.toml' \
+    "image installs main mise config for tooling"
 }
 
 test_build_flag_runs_build_then_runtime() {
@@ -283,8 +280,7 @@ test_workdir_precedence() {
   (
     cd "$pwd_case"
     expected_pwd_case="$(pwd -P)"
-    DOCKER_GID=1111 PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" \
-      "$SCRIPT_PATH" true
+    DOCKER_GID=1111 run_capsule "$mock_bin" "$log_file" true
     printf '%s\n' "$expected_pwd_case" >"$tdir/expected_pwd_case"
   )
   expected_pwd_case="$(cat "$tdir/expected_pwd_case")"
@@ -303,7 +299,7 @@ test_linux_gid_autodetect_from_docker_host() {
   make_mock_bin "$mock_bin"
   : >"$sock_path"
 
-  DOCKER_GID= DOCKER_HOST="unix://$sock_path" MOCK_STAT_GID=5678 \
+  DOCKER_GID="" DOCKER_HOST="unix://$sock_path" MOCK_STAT_GID=5678 \
     run_capsule "$mock_bin" "$log_file" true
 
   assert_equals "5678" "$(value_from_log ENV_DOCKER_GID "$log_file")" \
@@ -319,7 +315,7 @@ test_bad_docker_host_falls_back_to_context_socket() {
   make_mock_bin "$mock_bin"
   : >"$sock_path"
 
-  DOCKER_GID= DOCKER_HOST="unix://$tdir/missing.sock" \
+  DOCKER_GID="" DOCKER_HOST="unix://$tdir/missing.sock" \
     MOCK_CONTEXT_HOST="unix://$sock_path" MOCK_STAT_GID=6789 \
     run_capsule "$mock_bin" "$log_file" true
 
@@ -336,7 +332,7 @@ test_macos_staff_gid_override() {
   make_mock_bin "$mock_bin"
   : >"$sock_path"
 
-  DOCKER_GID= DOCKER_HOST="unix://$sock_path" MOCK_UNAME=Darwin \
+  DOCKER_GID="" DOCKER_HOST="unix://$sock_path" MOCK_UNAME=Darwin \
     MOCK_STAT_GID=20 \
     run_capsule "$mock_bin" "$log_file" true
 
@@ -351,13 +347,13 @@ test_default_gid_when_detection_fails() {
   mkdir -p "$tdir"
   make_mock_bin "$mock_bin"
 
-  DOCKER_GID= DOCKER_HOST="unix://$tdir/missing.sock" MOCK_STAT_FAIL=1 \
+  DOCKER_GID="" DOCKER_HOST="unix://$tdir/missing.sock" MOCK_STAT_FAIL=1 \
     run_capsule "$mock_bin" "$log_file" true
   assert_equals "999" "$(value_from_log ENV_DOCKER_GID "$log_file")" \
     "Linux default DOCKER_GID is 999 when detection fails"
 
   : >"$log_file"
-  DOCKER_GID= DOCKER_HOST="unix://$tdir/missing.sock" MOCK_UNAME=Darwin \
+  DOCKER_GID="" DOCKER_HOST="unix://$tdir/missing.sock" MOCK_UNAME=Darwin \
     MOCK_STAT_FAIL=1 run_capsule "$mock_bin" "$log_file" true
   assert_equals "991" "$(value_from_log ENV_DOCKER_GID "$log_file")" \
     "macOS default DOCKER_GID is 991 when detection fails"
@@ -368,6 +364,12 @@ main() {
     fail "capsule.sh has valid shell syntax"
   else
     pass "capsule.sh has valid shell syntax"
+  fi
+
+  if ! shellcheck "$SCRIPT_PATH"; then
+      fail "capsule.sh has linting errors"
+  else
+      pass "capsule.sh is lint free"
   fi
 
   test_compose_contract

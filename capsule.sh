@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
 export CAPSULE_WORKDIR="${CAPSULE_WORKDIR:-${CC_WORKDIR:-$(pwd -P)}}"
 BUILD_BEFORE_RUN=0
 RUNTIME_ARGS=()
@@ -38,6 +38,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+CAPSULE_CONFIG=${CAPSULE_CONFIG:-"${HOME}/.config/capsule"}
+if ! grep -qs "^${CAPSULE_WORKDIR}\$" "${CAPSULE_CONFIG}"; then
+    read -rs -n 1 -p "Allow capsule to run in ${CAPSULE_WORKDIR} (y/N)? " key
+    if [[ $key == 'y' || $key == 'Y' ]]; then
+        echo 'y'
+        echo "${CAPSULE_WORKDIR}" >>"${CAPSULE_CONFIG}"
+    else
+        echo 'n'
+        exit 1
+    fi
+fi
+
 if [[ -z "${DOCKER_GID:-}" ]]; then
   DOCKER_SOCK_PATH=""
   DOCKER_HOST_SOCK_PATH=""
@@ -69,9 +81,7 @@ if [[ -z "${DOCKER_GID:-}" ]]; then
     )"; then
       export DOCKER_GID="${DOCKER_GID_VALUE}"
     else
-      if DOCKER_GID_VALUE="$(
-        ls -ln "${DOCKER_SOCK_PATH}" 2>/dev/null | awk '{print $4}'
-      )"; then
+      if DOCKER_GID_VALUE="$(stat -c '%g' "${DOCKER_SOCK_PATH}")"; then
         if [[ -n "${DOCKER_GID_VALUE}" ]]; then
           export DOCKER_GID="${DOCKER_GID_VALUE}"
         fi

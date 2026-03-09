@@ -1,0 +1,11 @@
+[tools]
+bat = "latest"
+eza = "latest"
+fd = "latest"
+gh = "latest"
+node = "24"
+python = "3.14"
+ripgrep = "latest"
+starship = "latest"
+usage = "latest"
+uv = "latest"

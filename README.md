@@ -9,7 +9,7 @@ common developer tools.
   Codex, OpenAI CLI, Docker CLI, Compose plugin, Copilot CLI, and agent
   utilities (`rg`, `fd`, `jq`, `shellcheck`, `gh`, `tree`).
 - `compose.yml`: Local compose service (`cli`) that builds from `Dockerfile`,
-  runs as `8888:100`, and adds Docker socket access via `DOCKER_GID`.
+  runs as `1000:1000`, and adds Docker socket access via `DOCKER_GID`.
 - `capsule.sh`: Launcher script for running the CLI from any project
   directory.
 - `tests/test_capsule.sh`: Bash test suite for launcher and Compose contract.
@@ -33,7 +33,7 @@ docker run --rm -it \
   -e DOCKER_HOST=unix:///var/run/docker.sock \
   -e DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)" \
   -w /home/workspace \
-  --user 8888:100 \
+  --user 1000:1000 \
   --group-add "${DOCKER_GID}" \
   -v "$PWD:/home/workspace" \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -53,7 +53,7 @@ copilot
 CLI service from this repository's Compose file. `compose.yml` falls back to
 `CC_WORKDIR` and then `PWD` if `CAPSULE_WORKDIR` is not set. It also detects
 `DOCKER_GID` from the active Docker socket when possible.
-The service runs as `uid=8888,gid=100` and uses `group_add` with
+The service runs as `uid=1000,gid=1000` and uses `group_add` with
 `DOCKER_GID` for host Docker socket access.
 If detection fails, it defaults to `991` on macOS and `999` on Linux.
 On macOS, if auto-detection returns `20` (`staff`), `capsule.sh` overrides it
@@ -178,4 +178,3 @@ untrusted code, untrusted users, or shared multi-tenant hosts.
 Copyright 2026 Cursor Insight
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
-

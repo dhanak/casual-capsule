@@ -1,10 +1,23 @@
+ARG DEBIAN_VERSION=trixie
+
 #------------------------------------------------------------------------------
 # Runtime
 #------------------------------------------------------------------------------
-FROM jdxcode/mise:2026.3 AS runtime
+FROM debian:${DEBIAN_VERSION}-slim AS runtime
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# https://docs.docker.com/build/cache/
+RUN --mount=type=cache,id=apt-global,sharing=locked,target=/var/cache/apt \
+    apt-get update && \
+    apt-get -y --no-install-recommends install \
+    bash-completion build-essential ca-certificates curl git gnupg less \
+    openssh-client shellcheck sudo tree unzip vim && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/workspace
 
+# setup docker
 RUN install -m 0755 -d /etc/apt/keyrings && \
     . /etc/os-release && \
     DISTRO_ID="${ID}" && \
@@ -27,43 +40,46 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
     > /etc/apt/sources.list.d/github-cli.list
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    docker-buildx-plugin docker-ce-cli docker-compose-plugin \
-    ca-certificates curl fd-find gh git gnupg jq less ripgrep \
-    shellcheck sudo tree vim && \
-    ln -sf /usr/bin/fdfind /usr/local/bin/fd && \
+    apt-get -y --no-install-recommends install \
+    docker-buildx-plugin docker-ce-cli docker-compose-plugin && \
     rm -rf /var/lib/apt/lists/*
 
 # Add user
-RUN useradd -m -u 8888 -g 100 -s /bin/bash user
+RUN groupadd -g 1000 user && useradd -m -u 1000 -g 1000 -s /bin/bash user
+
+# set mise paths
+ENV MISE_DATA_DIR="/mise"
+ENV MISE_CONFIG_DIR="/mise"
+ENV MISE_CACHE_DIR="/mise/cache"
+ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
+ENV PATH="/mise/shims:$PATH"
 
 # Initialize mise root for 'user'
 RUN mkdir -p /mise && chown -Rh user: /mise
+COPY --chown=user docker/mise.toml /mise/config.toml
+
+# Install mise
+RUN curl https://mise.run | sh
 
 # Automatically activate mise
 RUN echo 'eval "$(mise activate bash)"' >> /etc/profile
+RUN echo 'eval "$(mise complete bash)"' >> /etc/profile
 
 # Switch user
 USER user
 
-# Use a common AGENTS.md in the direct parent of `workspace`
-COPY docker/AGENTS.md /home/
+# Copy GITHUB_API_TOKEN from builder env
+ARG GITHUB_API_TOKEN=""
+ENV GITHUB_API_TOKEN=${GITHUB_API_TOKEN}
 
-# Install nodejs
-RUN mise use -g node@24
+# Install mise and tools
 RUN mise install
-
-# Install golang
-RUN mise use -g golang@1.26
-
-# Install Codex
-RUN npm install -g @openai/codex open-codex
 
 # Install Copilot and vim extension
 RUN npm install -g @github/copilot
 
-# Remove mise's original entrypoint
-ENTRYPOINT []
+# Use a common AGENTS.md in the direct parent of `workspace`
+COPY --chmod=644 docker/AGENTS.md /home/
 
 # By default start a shell
-CMD [ "/bin/bash" ]
+CMD [ "/bin/bash", "-il" ]
