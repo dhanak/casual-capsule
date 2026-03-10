@@ -5,11 +5,15 @@ common developer tools.
 
 ## Project Structure
 
-- `Dockerfile`: Main image based on `jdxcode/mise` with Node, Go, npm,
-  Codex, OpenAI CLI, Docker CLI, Compose plugin, Copilot CLI, and agent
-  utilities (`rg`, `fd`, `jq`, `shellcheck`, `gh`, `tree`).
+- `Dockerfile`: Main image based on `debian:trixie-slim`; installs mise
+  at build time to manage Node, Python, and agent utilities (`rg`, `fd`,
+  `jq`, `bat`, `eza`, `shellcheck`, `gh`, `tree`), plus Docker CLI,
+  Compose plugin, and Copilot CLI.
+- `docker/mise.toml`: Declares the mise-managed tool versions installed
+  into the image.
 - `compose.yml`: Local compose service (`cli`) that builds from `Dockerfile`,
-  runs as `1000:1000`, and adds Docker socket access via `DOCKER_GID`.
+  runs as `1000:1000`, sets hostname `capsule`, adds Docker socket access via
+  `DOCKER_GID`, and persists mise tool data in a named volume.
 - `capsule.sh`: Launcher script for running the CLI from any project
   directory.
 - `tests/test_capsule.sh`: Bash test suite for launcher and Compose contract.
@@ -43,7 +47,6 @@ docker run --rm -it \
 Inside container:
 
 ```bash
-codex
 copilot
 ```
 
@@ -53,6 +56,10 @@ copilot
 CLI service from this repository's Compose file. `compose.yml` falls back to
 `CC_WORKDIR` and then `PWD` if `CAPSULE_WORKDIR` is not set. It also detects
 `DOCKER_GID` from the active Docker socket when possible.
+On the first run in a new directory, `capsule.sh` prompts for explicit
+approval and records the approved path in `~/.config/capsule` (overridable
+via `CAPSULE_CONFIG`) to prevent unintended execution in unrecognized
+directories.
 The service runs as `uid=1000,gid=1000` and uses `group_add` with
 `DOCKER_GID` for host Docker socket access.
 If detection fails, it defaults to `991` on macOS and `999` on Linux.
@@ -153,11 +160,15 @@ The tests use command stubs, so they do not require a running Docker daemon.
 The image includes utilities commonly used by coding agents:
 
 - `rg` (`ripgrep`) for fast content search
-- `fd` (`fdfind`) for fast file discovery
+- `fd` for fast file discovery
 - `jq` for JSON filtering and inspection
+- `bat` for syntax-highlighted file viewing
+- `eza` for enhanced directory listing
 - `shellcheck` for shell script linting
 - `gh` for GitHub CLI operations
 - `tree` for directory structure visualization
+
+These tools are declared in `docker/mise.toml` and installed via mise.
 
 Verify inside capsule:
 

@@ -1,3 +1,6 @@
+# syntax=docker/dockerfile:1
+# check=skip=SecretsUsedInArgOrEnv
+
 ARG DEBIAN_VERSION=trixie
 
 #------------------------------------------------------------------------------
@@ -11,9 +14,10 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=cache,id=apt-global,sharing=locked,target=/var/cache/apt \
     apt-get update && \
     apt-get -y --no-install-recommends install \
-    bash-completion build-essential ca-certificates curl git gnupg less \
-    openssh-client shellcheck sudo tree unzip vim && \
-    rm -rf /var/lib/apt/lists/*
+    bash-completion build-essential busybox ca-certificates curl git gnupg \
+    openssh-client procps shellcheck sudo tree unzip vim zip && \
+    rm -rf /var/lib/apt/lists/* && \
+    busybox --install -s
 
 WORKDIR /home/workspace
 
@@ -39,7 +43,8 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
     "https://cli.github.com/packages stable main" \
     > /etc/apt/sources.list.d/github-cli.list
 
-RUN apt-get update && \
+RUN --mount=type=cache,id=apt-global,sharing=locked,target=/var/cache/apt \
+    apt-get update && \
     apt-get -y --no-install-recommends install \
     docker-buildx-plugin docker-ce-cli docker-compose-plugin && \
     rm -rf /var/lib/apt/lists/*
