@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 export CAPSULE_WORKDIR="${CAPSULE_WORKDIR:-${CC_WORKDIR:-$(pwd -P)}}"
+export CAPSULE_UID="${CAPSULE_UID:-1000}"
+export CAPSULE_GID="${CAPSULE_GID:-100}"
 BUILD_BEFORE_RUN=0
 RUNTIME_ARGS=()
 
@@ -13,6 +15,12 @@ Usage: capsule.sh [options] [--] [command...]
 Options:
   -b, --build  Run "docker compose build cli" before runtime.
   -h, --help   Show this help message.
+
+Environment:
+  CAPSULE_UID      Container user UID (default: 1000).
+  CAPSULE_GID      Container user GID (default: 100).
+  DOCKER_GID       Docker socket GID (auto-detected).
+  CAPSULE_WORKDIR  Workspace directory (default: cwd).
 EOF
 }
 

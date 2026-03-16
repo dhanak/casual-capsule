@@ -5,11 +5,12 @@ common developer tools.
 
 ## Project Structure
 
-- `Dockerfile`: Main image based on `jdxcode/mise` with Node, Go, npm,
-  Codex, OpenAI CLI, Docker CLI, Compose plugin, Copilot CLI, and agent
-  utilities (`rg`, `fd`, `jq`, `shellcheck`, `gh`, `tree`).
-- `compose.yml`: Local compose service (`cli`) that builds from `Dockerfile`,
-  runs as `8888:100`, and adds Docker socket access via `DOCKER_GID`.
+- `Dockerfile`: Main image based on `jdxcode/mise` with Node, Go,
+  Codex, Open Codex, Docker CLI, Compose plugin, Copilot CLI, and
+  agent utilities (`rg`, `fd`, `jq`, `shellcheck`, `gh`, `tree`).
+- `compose.yml`: Local compose service (`cli`) that builds from `Dockerfile`
+  and adds Docker socket access via `DOCKER_GID`. The container user
+  defaults to `1000:100` unless `CAPSULE_UID`/`CAPSULE_GID` are exported.
 - `capsule.sh`: Launcher script for running the CLI from any project
   directory.
 - `tests/test_capsule.sh`: Bash test suite for launcher and Compose contract.
@@ -30,15 +31,17 @@ docker build -t casual-capsule:latest .
 
 ```bash
 docker run --rm -it \
-  -e DOCKER_HOST=unix:///var/run/docker.sock \
   -e DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)" \
   -w /home/workspace \
-  --user 8888:100 \
-  --group-add "${DOCKER_GID}" \
   -v "$PWD:/home/workspace" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   casual-capsule:latest
 ```
+
+The entrypoint runs as root, adjusts the container user to
+`CAPSULE_UID`:`CAPSULE_GID` (default `1000:100`), adds it to the
+`DOCKER_GID` group, sets `HOME`/`USER`/`LOGNAME`, and drops privileges.
+No `--user` or `--group-add` flags required.
 
 Inside container:
 
@@ -50,15 +53,22 @@ copilot
 ### 3. Use `capsule.sh` (recommended)
 
 `capsule.sh` sets `CAPSULE_WORKDIR` to your current directory and runs the
-CLI service from this repository's Compose file. `compose.yml` falls back to
-`CC_WORKDIR` and then `PWD` if `CAPSULE_WORKDIR` is not set. It also detects
-`DOCKER_GID` from the active Docker socket when possible.
-The service runs as `uid=8888,gid=100` and uses `group_add` with
-`DOCKER_GID` for host Docker socket access.
-If detection fails, it defaults to `991` on macOS and `999` on Linux.
-On macOS, if auto-detection returns `20` (`staff`), `capsule.sh` overrides it
-to `991` because `20` is commonly not usable for Docker socket access here.
-If you export `DOCKER_GID` yourself, `capsule.sh` keeps your explicit value.
+CLI service via Compose. It auto-detects `DOCKER_GID` from the active Docker
+socket (falling back to `991` on macOS, `999` on Linux). The container user
+defaults to `1000:100`; the entrypoint handles UID/GID adjustment and
+Docker socket group membership at startup.
+
+Override UID/GID or DOCKER_GID via environment:
+
+```bash
+CAPSULE_UID=2000 CAPSULE_GID=2000 capsule
+```
+
+Bake a custom UID/GID into the image (avoids runtime `chown`):
+
+```bash
+CAPSULE_UID=2000 CAPSULE_GID=2000 capsule --build
+```
 
 Launcher options:
 
@@ -89,7 +99,7 @@ Then reload your shell and run:
 capsule
 ```
 
-Optional: pass a command instead of the default shell.
+Pass a command instead of the default shell:
 
 ```bash
 capsule codex
@@ -97,46 +107,41 @@ capsule bash -lc "go version && node -v"
 capsule docker ps
 ```
 
-Optional: build the `cli` image before runtime.
+Build the image before starting:
 
 ```bash
 capsule --build
 capsule -b codex
 ```
 
-Use `--` when runtime arguments overlap launcher flags.
+Use `--` when arguments overlap launcher flags:
 
 ```bash
 capsule -- --build true
 ```
 
-`capsule -b` (with no runtime command) is supported and will still start the
-default runtime after the build.
-
 ### 4. Use Docker Compose directly
 
-If you prefer direct Compose commands:
+```bash
+docker compose run --rm cli
+```
+
+Build and run in one step:
 
 ```bash
-docker compose up --build
+docker compose run --rm --build cli
 ```
 
 If Docker socket permissions fail, set `DOCKER_GID` and retry:
 
 ```bash
+# Linux
 export DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
-docker compose run --rm cli docker ps
-```
-
-On macOS, use:
-
-```bash
+# macOS
 export DOCKER_GID="$(stat -f '%g' /var/run/docker.sock)"
-docker compose run --rm cli docker ps
-```
 
-Note: the injected Docker group may appear as a numeric GID inside the
-container if no matching group name exists in `/etc/group`.
+docker compose run --rm cli
+```
 
 ### 5. Run tests
 
@@ -168,10 +173,8 @@ capsule bash -lc "rg --version && fd --version && jq --version && \
 
 ## Security Note
 
-This setup mounts `/var/run/docker.sock` into the container so processes inside
-the container can control the host Docker daemon.
-Treat this as effectively host-level access. Do not use this setup with
-untrusted code, untrusted users, or shared multi-tenant hosts.
+This setup mounts `/var/run/docker.sock` into the container, giving it
+host-level Docker access. Do not use with untrusted code or shared hosts.
 
 ## License
 

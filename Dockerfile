@@ -3,6 +3,9 @@
 #------------------------------------------------------------------------------
 FROM jdxcode/mise:2026.3 AS runtime
 
+ARG CAPSULE_UID=1000
+ARG CAPSULE_GID=100
+
 WORKDIR /home/workspace
 
 RUN install -m 0755 -d /etc/apt/keyrings && \
@@ -34,14 +37,22 @@ RUN apt-get update && \
     ln -sf /usr/bin/fdfind /usr/local/bin/fd && \
     rm -rf /var/lib/apt/lists/*
 
-# Add user
-RUN useradd -m -u 8888 -g 100 -s /bin/bash user
+# Add user (reuse existing group when GID already exists)
+RUN if ! getent group "${CAPSULE_GID}" >/dev/null 2>&1; then \
+      groupadd -g "${CAPSULE_GID}" capsule; \
+    fi && \
+    useradd -m -u "${CAPSULE_UID}" \
+      -g "${CAPSULE_GID}" -s /bin/bash user
 
 # Initialize mise root for 'user'
 RUN mkdir -p /mise && chown -Rh user: /mise
 
 # Automatically activate mise
 RUN echo 'eval "$(mise activate bash)"' >> /etc/profile
+
+# Copy entrypoint (owned by root for security)
+COPY docker/entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Switch user
 USER user
@@ -62,8 +73,7 @@ RUN npm install -g @openai/codex open-codex
 # Install Copilot and vim extension
 RUN npm install -g @github/copilot
 
-# Remove mise's original entrypoint
-ENTRYPOINT []
-
-# By default start a shell
-CMD [ "/bin/bash" ]
+# Entrypoint runs as root, adjusts UID/GID, drops privileges
+USER root
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/bin/bash", "-l"]
