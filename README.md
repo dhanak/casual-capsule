@@ -10,7 +10,8 @@ common developer tools.
   agent utilities (`rg`, `fd`, `jq`, `shellcheck`, `gh`, `tree`).
 - `compose.yml`: Local compose service (`cli`) that builds from `Dockerfile`
   and adds Docker socket access via `DOCKER_GID`. The container user
-  defaults to `1000:100` unless `CAPSULE_UID`/`CAPSULE_GID` are exported.
+  matches the host user's UID/GID (auto-detected by `capsule.sh`);
+  override with `CAPSULE_UID`/`CAPSULE_GID`.
 - `capsule.sh`: Launcher script for running the CLI from any project
   directory.
 - `tests/test_capsule.sh`: Bash test suite for launcher and Compose contract.
@@ -53,10 +54,12 @@ copilot
 ### 3. Use `capsule.sh` (recommended)
 
 `capsule.sh` sets `CAPSULE_WORKDIR` to your current directory and runs the
-CLI service via Compose. It auto-detects `DOCKER_GID` from the active Docker
-socket (falling back to `991` on macOS, `999` on Linux). The container user
-defaults to `1000:100`; the entrypoint handles UID/GID adjustment and
-Docker socket group membership at startup.
+CLI service via Compose. It auto-detects the host user's UID/GID via
+`id -u`/`id -g` and `DOCKER_GID` from the active Docker socket (falling
+back to `991` on macOS, `999` on Linux). If UID/GID detection fails
+(e.g. `id` is unavailable), it falls back to `1000:100` and prints a
+warning. The entrypoint handles UID/GID adjustment and Docker socket
+group membership at startup.
 
 Override UID/GID or DOCKER_GID via environment:
 

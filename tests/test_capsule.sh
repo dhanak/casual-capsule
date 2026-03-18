@@ -113,7 +113,21 @@ fi
 /bin/ls "$@"
 EOF
 
-  chmod +x "$dir/docker" "$dir/stat" "$dir/uname" "$dir/ls"
+  cat >"$dir/id" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${MOCK_ID_FAIL:-}" ]]; then
+  exit 1
+fi
+case "${1:-}" in
+  -u) printf '%s\n' "${MOCK_ID_UID:-1000}" ;;
+  -g) printf '%s\n' "${MOCK_ID_GID:-100}" ;;
+  *) /usr/bin/id "$@" ;;
+esac
+EOF
+
+  chmod +x "$dir/docker" "$dir/stat" "$dir/uname" "$dir/ls" \
+    "$dir/id"
 }
 
 run_capsule() {
@@ -323,21 +337,46 @@ test_explicit_docker_gid_passthrough() {
     "capsule forwards explicit CAPSULE_WORKDIR"
 }
 
-test_uid_gid_defaults() {
-  local tdir="$TEST_TMPDIR/uid-defaults"
+test_uid_gid_autodetect() {
+  local tdir="$TEST_TMPDIR/uid-autodetect"
   local mock_bin="$tdir/bin"
   local log_file="$tdir/log"
   mkdir -p "$tdir"
   make_mock_bin "$mock_bin"
 
-  DOCKER_GID=1111 run_capsule "$mock_bin" "$log_file" true
+  unset CAPSULE_UID CAPSULE_GID 2>/dev/null || true
+  DOCKER_GID=1111 MOCK_ID_UID=501 MOCK_ID_GID=20 \
+    run_capsule "$mock_bin" "$log_file" true
+
+  assert_equals "501" \
+    "$(value_from_log ENV_CAPSULE_UID "$log_file")" \
+    "CAPSULE_UID auto-detects from host user"
+  assert_equals "20" \
+    "$(value_from_log ENV_CAPSULE_GID "$log_file")" \
+    "CAPSULE_GID auto-detects from host user"
+}
+
+test_uid_gid_fallback_when_id_fails() {
+  local tdir="$TEST_TMPDIR/uid-fallback"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  local err_file="$tdir/err"
+  mkdir -p "$tdir"
+  make_mock_bin "$mock_bin"
+
+  unset CAPSULE_UID CAPSULE_GID 2>/dev/null || true
+  DOCKER_GID=1111 MOCK_ID_FAIL=1 \
+    run_capsule "$mock_bin" "$log_file" true 2>"$err_file"
 
   assert_equals "1000" \
     "$(value_from_log ENV_CAPSULE_UID "$log_file")" \
-    "CAPSULE_UID defaults to 1000"
+    "CAPSULE_UID falls back to 1000 when id fails"
   assert_equals "100" \
     "$(value_from_log ENV_CAPSULE_GID "$log_file")" \
-    "CAPSULE_GID defaults to 100"
+    "CAPSULE_GID falls back to 100 when id fails"
+  assert_file_contains "$err_file" \
+    "cannot detect host UID/GID" \
+    "fallback emits warning to stderr"
 }
 
 test_explicit_uid_gid_passthrough() {
@@ -481,7 +520,8 @@ main() {
   test_build_flag_without_runtime_args
   test_plain_runtime_without_args
   test_explicit_docker_gid_passthrough
-  test_uid_gid_defaults
+  test_uid_gid_autodetect
+  test_uid_gid_fallback_when_id_fails
   test_explicit_uid_gid_passthrough
   test_workdir_precedence
   test_linux_gid_autodetect_from_docker_host
