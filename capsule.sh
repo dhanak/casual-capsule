@@ -109,7 +109,10 @@ COMPOSE_CMD=(
 )
 
 if [[ "$BUILD_BEFORE_RUN" -eq 1 ]]; then
-  "${COMPOSE_CMD[@]}" build cli
+    if hash mise 2>/dev/null && hash jq 2>/dev/null; then
+        MISE_VERSION=$(mise version --json | jq .latest)
+    fi
+    "${COMPOSE_CMD[@]}" build --build-arg "MISE_VERSION=${MISE_VERSION//\"/}" cli
 fi
 
 if [[ "${#RUNTIME_ARGS[@]}" -gt 0 ]]; then

@@ -52,6 +52,7 @@ RUN --mount=type=cache,id=apt-global,sharing=locked,target=/var/cache/apt \
 RUN groupadd -g 1000 user && useradd -m -u 1000 -g 1000 -s /bin/bash user
 
 # Install mise
+ARG MISE_VERSION=""
 ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
 RUN curl https://mise.run | sh
 
@@ -69,7 +70,7 @@ USER user
 
 # Activate system tools
 RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN \
-    mise use -g ${MISE_SYSTEM_TOOLS}
+    mise use --global ${MISE_SYSTEM_TOOLS}
 
 # GitHub token login
 RUN --mount=type=secret,id=github_api_token,uid=1000 \
