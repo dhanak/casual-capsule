@@ -181,8 +181,9 @@ test_dockerfile_uid_gid_contract() {
   assert_file_contains "$DOCKERFILE_PATH" \
     'ARG CAPSULE_GID=100' \
     "Dockerfile declares CAPSULE_GID build arg"
+  # shellcheck disable=SC2016
   assert_file_contains "$DOCKERFILE_PATH" \
-    'useradd -m -u "${CAPSULE_UID}"' \
+    'useradd -l -m -u "${CAPSULE_UID}"' \
     "Dockerfile uses CAPSULE_UID in useradd"
   assert_file_contains "$DOCKERFILE_PATH" \
     'COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/' \
@@ -237,9 +238,7 @@ test_build_flag_runs_build_then_runtime() {
   local expected_build=""
   local expected_run=""
   local mise_ver=""
-  if hash mise 2>/dev/null && hash jq 2>/dev/null; then
-    mise_ver="$(mise version --json | jq -r .latest)"
-  fi
+  mise_ver="$(curl -s https://mise.jdx.dev/VERSION)"
   mkdir -p "$tdir"
   make_mock_bin "$mock_bin"
 

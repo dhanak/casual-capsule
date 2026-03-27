@@ -1,5 +1,11 @@
 # syntax=docker/dockerfile:1
 
+# Disabled hadolint checkers:
+#  - DL3002: Last user should not be root.
+#  - DL3008: Pin versions in `apt-get install`.
+#  - SC2016: Expressions don't expand in single quotes.
+# hadolint global ignore=DL3002,DL3008,SC2016
+
 ARG DEBIAN_VERSION=trixie
 
 #------------------------------------------------------------------------------
@@ -52,7 +58,7 @@ ARG CAPSULE_GID=100
 RUN if ! getent group "${CAPSULE_GID}" >/dev/null 2>&1; then \
       groupadd -g "${CAPSULE_GID}" capsule; \
     fi && \
-    useradd -m -u "${CAPSULE_UID}" \
+    useradd -l -m -u "${CAPSULE_UID}" \
       -g "${CAPSULE_GID}" -s /bin/bash user
 
 WORKDIR /home/workspace
@@ -68,8 +74,8 @@ RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN \
     mise install --system ${MISE_SYSTEM_TOOLS}
 
 # Activate mise in interactive shells
-RUN echo 'eval "$(mise activate bash)"' >> /etc/profile
-RUN echo 'eval "$(mise complete bash)"' >> /etc/profile
+RUN echo 'eval "$(mise activate bash)"' >> /etc/profile && \
+    echo 'eval "$(mise complete bash)"' >> /etc/profile
 
 # Copy entrypoint (owned by root for security)
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/
@@ -96,7 +102,7 @@ RUN mise x -- uv python install --default ${PYTHON_VERSION} && \
 COPY --chmod=644 docker/AGENTS.md /home/
 
 # Add mise shims to path
-ENV PATH="/home/user/.local/share/mise/shims:$PATH"
+ENV PATH="/home/user/.local/share/mise/shims:/home/user/.local/bin:$PATH"
 
 # Entrypoint runs as root, adjusts UID/GID, drops privileges
 USER root
