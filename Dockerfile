@@ -3,8 +3,7 @@
 # Disabled hadolint checkers:
 #  - DL3002: Last user should not be root.
 #  - DL3008: Pin versions in `apt-get install`.
-#  - SC2016: Expressions don't expand in single quotes.
-# hadolint global ignore=DL3002,DL3008,SC2016
+# hadolint global ignore=DL3002,DL3008
 
 ARG DEBIAN_VERSION=trixie
 
@@ -74,8 +73,7 @@ RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN \
     mise install --system ${MISE_SYSTEM_TOOLS}
 
 # Activate mise in interactive shells
-RUN echo 'eval "$(mise activate bash)"' >> /etc/profile && \
-    echo 'eval "$(mise complete bash)"' >> /etc/profile
+COPY --chmod=644 docker/mise.sh /etc/profile.d/
 
 # Copy entrypoint (owned by root for security)
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/
