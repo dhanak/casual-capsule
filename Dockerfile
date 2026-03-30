@@ -23,33 +23,10 @@ RUN --mount=type=cache,id=apt-global,sharing=locked,target=/var/cache/apt \
     rm -rf /var/lib/apt/lists/* && \
     busybox --install -s
 
-# setup docker
-RUN install -m 0755 -d /etc/apt/keyrings && \
-    . /etc/os-release && \
-    DISTRO_ID="${ID}" && \
-    DISTRO_CODENAME="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}" && \
-    curl -fsSL "https://download.docker.com/linux/${DISTRO_ID}/gpg" | \
-    gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
-    chmod a+r /etc/apt/keyrings/docker.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) " \
-    "signed-by=/etc/apt/keyrings/docker.gpg] " \
-    "https://download.docker.com/linux/${DISTRO_ID} " \
-    "${DISTRO_CODENAME} stable" \
-    > /etc/apt/sources.list.d/docker.list && \
-    curl -fsSL \
-    https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    -o /etc/apt/keyrings/github-cli.gpg && \
-    chmod a+r /etc/apt/keyrings/github-cli.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) " \
-    "signed-by=/etc/apt/keyrings/github-cli.gpg] " \
-    "https://cli.github.com/packages stable main" \
-    > /etc/apt/sources.list.d/github-cli.list
-
+# setup docker source and install packages
+COPY --chmod=700 docker/setup-docker.sh /tmp
 RUN --mount=type=cache,id=apt-global,sharing=locked,target=/var/cache/apt \
-    apt-get update && \
-    apt-get -y --no-install-recommends install \
-    docker-buildx-plugin docker-ce-cli docker-compose-plugin && \
-    rm -rf /var/lib/apt/lists/*
+    /tmp/setup-docker.sh
 
 # Add user (reuse existing group when GID already exists)
 ARG CAPSULE_UID=1000
