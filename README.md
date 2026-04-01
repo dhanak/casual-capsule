@@ -19,6 +19,11 @@ common developer tools.
 - `docker/entrypoint.sh`: Startup script that runs as root, adjusts the
   container user to match `CAPSULE_UID`/`CAPSULE_GID`, adds it to the Docker
   socket group, and drops privileges via `setpriv`.
+- `docker/setup-docker.sh`: Configures the Docker and GitHub CLI APT sources
+  and installs `docker-ce-cli`, `docker-compose-plugin`, and
+  `docker-buildx-plugin`.
+- `docker/mise.sh`: Placed in `/etc/profile.d/`; activates mise and its shell
+  completions for interactive shells.
 - `docker/AGENTS.md`: Shared agent policy file mounted at `/home/` inside the
   container.
 - `compose.yml`: Local Compose service (`cli`) that builds from `Dockerfile` and
@@ -214,7 +219,8 @@ Installed via `apt`:
 | `shellcheck` | Shell script linting              |
 | `tree`       | Directory structure visualization |
 
-Python tooling (installed via `uv`):
+Python tooling (installed via `uv`; binaries available on `PATH` via
+`~/.local/bin`):
 
 | Tool     | Purpose                                                              |
 |----------|----------------------------------------------------------------------|
