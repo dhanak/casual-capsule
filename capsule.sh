@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
-export CAPSULE_WORKDIR="${CAPSULE_WORKDIR:-${CC_WORKDIR:-$(pwd -P)}}"
+export CAPSULE_WORKDIR="${CAPSULE_WORKDIR:-$(pwd -P)}"
 _CAPSULE_ID_WARN=0
 
 # Resolve container UID: env > host id > default 1000.

@@ -10,7 +10,7 @@ services:
       secrets:
         - github_api_token
     volumes:
-      - ${CAPSULE_WORKDIR:-${CC_WORKDIR:-${PWD}}}:/home/workspace
+      - ${CAPSULE_WORKDIR:-${PWD}}:/home/workspace
       - /var/run/docker.sock:/var/run/docker.sock
       - home:/home/user
     environment:

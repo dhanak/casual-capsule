@@ -140,7 +140,7 @@ run_capsule() {
   local log_file="$2"
   local cfg_file="${TEST_TMPDIR}/config"
   shift 2
-  echo "${CAPSULE_WORKDIR:-${CC_WORKDIR:-$(pwd -P)}}" >"${cfg_file}"
+  echo "${CAPSULE_WORKDIR:-$(pwd -P)}" >"${cfg_file}"
   PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" CAPSULE_CONFIG="$cfg_file" \
       "$SCRIPT_PATH" "$@"
 }
@@ -166,7 +166,7 @@ test_compose_contract() {
     'CAPSULE_GID=${CAPSULE_GID:-}' \
     "compose passes CAPSULE_GID to container environment"
   assert_file_contains "$COMPOSE_PATH" \
-    '${CAPSULE_WORKDIR:-${CC_WORKDIR:-${PWD}}}:/home/workspace' \
+    '${CAPSULE_WORKDIR:-${PWD}}:/home/workspace' \
     "compose keeps CAPSULE_WORKDIR with compatibility fallback"
 }
 
@@ -407,18 +407,11 @@ test_workdir_precedence() {
   mkdir -p "$tdir"
   make_mock_bin "$mock_bin"
 
-  CAPSULE_WORKDIR=/tmp/capsule-first CC_WORKDIR=/tmp/legacy DOCKER_GID=1111 \
+  CAPSULE_WORKDIR=/tmp/capsule-first DOCKER_GID=1111 \
     run_capsule "$mock_bin" "$log_file" true
   assert_equals "/tmp/capsule-first" \
     "$(value_from_log ENV_CAPSULE_WORKDIR "$log_file")" \
-    "CAPSULE_WORKDIR takes precedence over CC_WORKDIR"
-
-  : >"$log_file"
-  CC_WORKDIR=/tmp/legacy-only DOCKER_GID=1111 \
-    run_capsule "$mock_bin" "$log_file" true
-  assert_equals "/tmp/legacy-only" \
-    "$(value_from_log ENV_CAPSULE_WORKDIR "$log_file")" \
-    "CC_WORKDIR is respected as backward-compatible fallback"
+    "CAPSULE_WORKDIR overrides current directory"
 
   : >"$log_file"
   local pwd_case="$tdir/pwd-case"
