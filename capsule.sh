@@ -74,13 +74,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 CAPSULE_CONFIG=${CAPSULE_CONFIG:-"${HOME}/.config/capsule"}
-if ! grep -qs "^${CAPSULE_WORKDIR}\$" "${CAPSULE_CONFIG}"; then
+mkdir -p "$(dirname "${CAPSULE_CONFIG}")"
+if ! grep -Fxqs "${CAPSULE_WORKDIR}" "${CAPSULE_CONFIG}"; then
+    if [[ ! -t 0 ]]; then
+        printf 'capsule: error: %s not in allowlist; ' \
+            "${CAPSULE_WORKDIR}" >&2
+        printf 'pre-approve in %s\n' "${CAPSULE_CONFIG}" >&2
+        exit 1
+    fi
     read -rs -n 1 -p "Allow capsule to run in ${CAPSULE_WORKDIR} (y/N)? " key
     if [[ $key == 'y' || $key == 'Y' ]]; then
-        echo 'y'
-        echo "${CAPSULE_WORKDIR}" >>"${CAPSULE_CONFIG}"
+        printf 'y\n' >&2
+        printf '%s\n' "${CAPSULE_WORKDIR}" >>"${CAPSULE_CONFIG}"
     else
-        echo 'n'
+        printf 'n\n' >&2
         exit 1
     fi
 fi
@@ -144,7 +151,16 @@ COMPOSE_CMD=(
 )
 
 if [[ "$BUILD_BEFORE_RUN" -eq 1 ]]; then
-    MISE_VERSION="$(curl -s https://mise.jdx.dev/VERSION)"
+    if ! MISE_VERSION="$(curl -fsSL https://mise.jdx.dev/VERSION)"; then
+        printf '%s\n' \
+            'capsule: error: failed to fetch MISE_VERSION' >&2
+        exit 1
+    fi
+    if [[ -z "$MISE_VERSION" ]]; then
+        printf '%s\n' \
+            'capsule: error: fetched empty MISE_VERSION' >&2
+        exit 1
+    fi
     "${COMPOSE_CMD[@]}" build --build-arg "MISE_VERSION=${MISE_VERSION}" cli
 fi
 

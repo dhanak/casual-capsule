@@ -126,8 +126,13 @@ case "${1:-}" in
 esac
 EOF
 
+  cat >"$dir/curl" <<'EOF'
+#!/usr/bin/env bash
+printf '2024.1.0\n'
+EOF
+
   chmod +x "$dir/docker" "$dir/stat" "$dir/uname" "$dir/ls" \
-    "$dir/id"
+    "$dir/id" "$dir/curl"
 }
 
 run_capsule() {
@@ -237,8 +242,7 @@ test_build_flag_runs_build_then_runtime() {
   local log_file="$tdir/log"
   local expected_build=""
   local expected_run=""
-  local mise_ver=""
-  mise_ver="$(curl -s https://mise.jdx.dev/VERSION)"
+  local mise_ver="2024.1.0"
   mkdir -p "$tdir"
   make_mock_bin "$mock_bin"
 
@@ -282,10 +286,7 @@ test_build_flag_without_runtime_args() {
   local log_file="$tdir/log"
   local expected_build=""
   local expected_run=""
-  local mise_ver=""
-  if hash mise 2>/dev/null && hash jq 2>/dev/null; then
-    mise_ver="$(mise version --json | jq -r .latest)"
-  fi
+  local mise_ver="2024.1.0"
   mkdir -p "$tdir"
   make_mock_bin "$mock_bin"
 
@@ -512,10 +513,14 @@ main() {
     pass "capsule.sh has valid shell syntax"
   fi
 
-  if ! shellcheck "$SCRIPT_PATH"; then
-      fail "capsule.sh has linting errors"
+  if command -v shellcheck >/dev/null 2>&1; then
+      if ! shellcheck "$SCRIPT_PATH"; then
+          fail "capsule.sh has linting errors"
+      else
+          pass "capsule.sh is lint free"
+      fi
   else
-      pass "capsule.sh is lint free"
+      printf 'SKIP: shellcheck not installed; skipping lint check\n'
   fi
 
   test_compose_contract

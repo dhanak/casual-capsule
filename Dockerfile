@@ -42,11 +42,11 @@ WORKDIR /home/workspace
 # Install mise
 ARG MISE_VERSION=""
 ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
-RUN curl https://mise.run | sh
+RUN curl -fsSL https://mise.run | sh
 
 # Install system tools with mise
 ARG MISE_SYSTEM_TOOLS="aqua:github/copilot-cli bat eza fd gh jq ripgrep usage uv"
-RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN \
+RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN,required=false \
     mise install --system ${MISE_SYSTEM_TOOLS}
 
 # Activate mise in interactive shells
@@ -59,11 +59,11 @@ COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/
 USER user
 
 # Activate system tools
-RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN \
+RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN,required=false \
     mise use --global ${MISE_SYSTEM_TOOLS}
 
 # GitHub token login
-RUN --mount=type=secret,id=github_api_token,uid=1000 \
+RUN --mount=type=secret,id=github_api_token,uid=1000,required=false \
     [ -f /run/secrets/github_api_token ] && \
       mise x -- gh auth login --with-token </run/secrets/github_api_token
 

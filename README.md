@@ -19,8 +19,8 @@ common developer tools.
 - `docker/entrypoint.sh`: Startup script that runs as root, adjusts the
   container user to match `CAPSULE_UID`/`CAPSULE_GID`, adds it to the Docker
   socket group, and drops privileges via `setpriv`.
-- `docker/setup-docker.sh`: Configures the Docker and GitHub CLI APT sources
-  and installs `docker-ce-cli`, `docker-compose-plugin`, and
+- `docker/setup-docker.sh`: Configures the Docker APT source and installs
+  `docker-ce-cli`, `docker-compose-plugin`, and
   `docker-buildx-plugin`.
 - `docker/mise.sh`: Placed in `/etc/profile.d/`; activates mise and its shell
   completions for interactive shells.
