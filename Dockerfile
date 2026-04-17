@@ -63,7 +63,7 @@ RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN,required=false 
 
 # GitHub token login
 RUN --mount=type=secret,id=github_api_token,uid=1000,required=false \
-    if [ -f /run/secrets/github_api_token ]; then \
+    if [ -s /run/secrets/github_api_token ]; then \
         mise x -- gh auth login --with-token </run/secrets/github_api_token; \
     fi
 
