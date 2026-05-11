@@ -43,8 +43,7 @@ ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
 RUN curl -fsSL https://mise.run | sh
 
 # Install system AI agents and tools with mise
-ARG MISE_SYSTEM_TOOLS="aqua:github/copilot-cli codex \
-        bat eza fd gh jq ripgrep usage uv"
+ARG MISE_SYSTEM_TOOLS="codex copilot bat eza fd gh jq ripgrep usage uv"
 RUN --mount=type=secret,id=github_api_token,env=GITHUB_API_TOKEN,required=false \
     mise install --system ${MISE_SYSTEM_TOOLS}
 
