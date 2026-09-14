@@ -47,6 +47,7 @@ common developer tools.
 - Docker Engine 24+ and Docker Compose v2
 - Optionally rootless [podman](https://podman.io) 4.9+, to run the Capsule
   with a container engine of its own instead of the host daemon
+  ([what it needs](#what-the-podman-backend-needs))
 - Access to Claude or Codex.
 
 ## 🚀 Initial setup
@@ -363,12 +364,75 @@ CAPSULE_RUNTIME=podman capsule     # the same choice, from the environment
     unpack an image that chowns a file. Capsule reads the same report and
     falls back to the Docker backend, naming the reason.
 
+*   **A reachable systemd user bus** on Linux, because rootless podman asks
+    your own `systemd --user` manager to create a cgroup scope for every
+    container. Without it the runtime falls back to the system manager,
+    polkit refuses the request, and nothing starts.
+    [How to check and fix it](#when-podman-cannot-start-a-container).
+
 *   **A Linux VM on macOS**, which podman manages itself (`podman machine
     init && podman machine start`). The workspace must live under `$HOME`
     for the machine to see it.
 
 Unlike the Docker backend, no AppArmor or sysctl change is needed on Ubuntu
 23.10+: podman's rootless path works there as shipped.
+
+#### When podman cannot start a container
+
+A build or run that dies with `Interactive authentication required`, on a
+scope request naming `system.slice` rather than `user.slice`, means the
+runtime could not reach your systemd user manager. One command settles it,
+run in the same shell where Capsule failed:
+
+```bash
+systemd-run --user --scope --quiet true && echo "user scopes work"
+```
+
+That does what the container runtime does. If it fails, podman fails the
+same way, and the cause is one of the three pieces that have to line up:
+`pam_systemd` gives a login session `/run/user/$(id -u)` and a
+`user@$(id -u).service` manager; the `dbus-user-session` package puts the
+bus at `$XDG_RUNTIME_DIR/bus`; and clients use `$DBUS_SESSION_BUS_ADDRESS`
+when it is set, falling back to `$XDG_RUNTIME_DIR/bus` when it is not. A
+*wrong* address is therefore worse than none, because it overrides the
+working default.
+
+*   **On a desktop login**, a session without `dbus-user-session` falls back
+    to `dbus-launch`, which puts a private bus in `/tmp/dbus-XXXXXX` and
+    exports its address. systemd is not on that bus. Install the package,
+    then log out of the desktop completely: a new terminal inherits the
+    stale address from the session that spawned it.
+
+*   **Over SSH**, `DBUS_SESSION_BUS_ADDRESS` is normally unset and the
+    fallback does the right thing, so the causes are the package missing, or
+    a stale address arriving from a shell startup file or from a terminal
+    multiplexer that was started on the desktop. Grep your dotfiles for
+    `dbus-launch`, and run `tmux kill-server` so new panes stop inheriting
+    the old environment.
+
+*   **`su` and `sudo -u` create no login session**, so that account gets no
+    `XDG_RUNTIME_DIR` and no user manager at all. Use `ssh` or
+    `machinectl shell user@` instead.
+
+Enable lingering as well, so the user manager and `/run/user/$(id -u)`
+outlive your last session rather than taking a running Capsule with them:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+If you would rather not depend on a session bus at all -- a headless
+builder, cron, CI -- take systemd out of the path instead. Rootless resource
+limits become advisory rather than enforced, which does not affect building
+or running the Capsule itself:
+
+```bash
+mkdir -p ~/.config/containers
+cat >> ~/.config/containers/containers.conf <<'EOF'
+[engine]
+cgroup_manager = "cgroupfs"
+EOF
+```
 
 #### The Capsule's own engine
 

@@ -649,6 +649,42 @@ EOF
     "check_all docker linters avoid container-only workdir mounts"
 }
 
+# A mise shim with no version pinned sits on PATH and fails the moment it
+# runs. Treat such a linter as absent rather than as a failing check.
+test_check_all_ignores_an_unusable_linter() {
+  local tdir="$TEST_TMPDIR/check-all-unusable-linter"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  mkdir -p "$mock_bin"
+  ln -s "$(command -v bash)" "$mock_bin/bash"
+  ln -s "$(command -v dirname)" "$mock_bin/dirname"
+
+  cat >"$mock_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'DOCKER_ARGS=%s\n' "$*" >>"${MOCK_LOG:?MOCK_LOG is required}"
+EOF
+  cat >"$mock_bin/shellcheck" <<'EOF'
+#!/usr/bin/env bash
+printf 'mise ERROR No version is set for shim: shellcheck\n' >&2
+exit 1
+EOF
+  chmod +x "$mock_bin/docker" "$mock_bin/shellcheck"
+
+  if PATH="$mock_bin" MOCK_LOG="$log_file" \
+    CAPSULE_WORKDIR="$ROOT_DIR" \
+    CAPSULE_HOST_WORKDIR=/host/workspace \
+    "$CHECK_ALL_PATH" >"$tdir/out" 2>&1; then
+    pass "an unusable linter does not fail the checks"
+  else
+    fail "an unusable linter does not fail the checks"
+  fi
+
+  assert_file_contains "$log_file" \
+    'koalaman/shellcheck' \
+    "an unusable shellcheck falls through to the container image"
+}
+
 test_build_flag_without_runtime_args() {
   local tdir="$TEST_TMPDIR/build-no-args"
   local mock_bin="$tdir/bin"
@@ -2055,9 +2091,19 @@ test_runtime_flag_rejects_bad_values() {
 make_router_env() {
   local dir="$1"
   local with_dockerd="${2:-}"
+  local tool=""
 
   mkdir -p "$dir/bin" "$dir/real" "$dir/state"
   ln -sf "$ROUTER_PATH" "$dir/bin/docker"
+
+  # The router runs on a PATH of its own so that a host engine cannot
+  # decide a case. A real dockerd-rootless.sh on the caller's PATH would
+  # otherwise make the missing-Engine case start that daemon and fail on
+  # its timeout instead of on the diagnostic the case asserts. Link in
+  # only the utilities the router and these mocks actually call.
+  for tool in bash basename cat chmod mkdir pkill rm sleep; do
+    ln -sf "$(command -v "$tool")" "$dir/bin/$tool"
+  done
 
   cat >"$dir/bin/podman" <<'EOF'
 #!/usr/bin/env bash
@@ -2108,7 +2154,7 @@ run_router() {
   shift 2
 
   if [[ "$invoked_as" == "docker" ]]; then
-    PATH="$dir/bin:$PATH" CAPSULE_ENGINE_DIR="$dir/state" \
+    PATH="$dir/bin" CAPSULE_ENGINE_DIR="$dir/state" \
       CAPSULE_REAL_DOCKER="$dir/real/docker" \
       CAPSULE_HOST_SOCKET="$dir/hostsock" \
       ROUTER_LOG="$dir/routed" \
@@ -2116,7 +2162,7 @@ run_router() {
     return
   fi
 
-  PATH="$dir/bin:$PATH" CAPSULE_ENGINE_DIR="$dir/state" \
+  PATH="$dir/bin" CAPSULE_ENGINE_DIR="$dir/state" \
     CAPSULE_REAL_DOCKER="$dir/real/docker" \
     CAPSULE_HOST_SOCKET="$dir/hostsock" \
     ROUTER_LOG="$dir/routed" \
@@ -2332,14 +2378,16 @@ main() {
     pass "capsule.sh has valid shell syntax"
   fi
 
-  if command -v shellcheck >/dev/null 2>&1; then
+  # Ask shellcheck to run rather than just look it up: a mise shim with no
+  # version set is on PATH but errors out the moment it is called.
+  if shellcheck --version >/dev/null 2>&1; then
     if ! shellcheck "$SCRIPT_PATH"; then
       fail "capsule.sh has linting errors"
     else
       pass "capsule.sh is lint free"
     fi
   else
-    skip "shellcheck not installed; skipping lint check"
+    skip "shellcheck unavailable; skipping lint check"
   fi
 
   test_compose_contract
@@ -2354,6 +2402,7 @@ main() {
   test_publish_and_volume_env_forward_to_runtime
   test_empty_optional_arrays_use_nounset_safe_expansion
   test_check_all_docker_linters_use_capsule_host_workdir
+  test_check_all_ignores_an_unusable_linter
   test_build_custom_flag_keeps_runtime_flags
   test_build_flag_without_runtime_args
   test_build_custom_flag_requires_custom_compose
