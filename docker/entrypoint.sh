@@ -43,10 +43,13 @@ refresh_gh_auth() {
 }
 
 # Give commands the image account's environment on both entrypoint paths.
+# The lookup is best-effort: this runs on the non-root path too, which the
+# test suite exercises on the host, where getent need not exist. The image
+# account lives in /home/user by construction, so that is the fallback.
 set_user_environment() {
   local user_home=""
 
-  user_home="$(getent passwd user | cut -d: -f6)"
+  user_home="$(getent passwd user 2>/dev/null | cut -d: -f6 || true)"
   export HOME="${user_home:-/home/user}"
   export USER=user
   export LOGNAME=user

@@ -373,6 +373,7 @@ test_dockerfile_uid_gid_contract() {
     "Dockerfile uses login shell as default command"
 }
 
+# shellcheck disable=SC2016
 test_entrypoint_contract() {
   if ! bash -n "$ENTRYPOINT_PATH"; then
     fail "entrypoint.sh has valid shell syntax"
