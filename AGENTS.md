@@ -75,6 +75,8 @@ Assisted-by: Copilot:claude-sonnet-4.6
   and runtime `github_api_token` secret.
 - `capsule.sh`: Launcher; selects the podman or Docker backend, and
   handles allowlist, UID/GID, build flags, and runtime invocations.
+- `capsule-doctor.sh`: Host environment check; reports what each backend
+  needs and the command that repairs what is missing.
 - `docker/entrypoint.sh`: Root entrypoint; syncs UID/GID, Docker socket
   group, nested Podman ID ranges, and home ownership, then execs as `user`.
   Under podman the container already starts as `user`, so it only refreshes

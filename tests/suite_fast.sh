@@ -14,6 +14,7 @@ set -euo pipefail
 ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)"
 SCRIPT_PATH="$ROOT_DIR/capsule.sh"
 CHECK_ALL_PATH="$ROOT_DIR/tests/check_all.sh"
+DOCTOR_PATH="$ROOT_DIR/capsule-doctor.sh"
 COMPOSE_PATH="$ROOT_DIR/compose.yml"
 DOCKERFILE_PATH="$ROOT_DIR/Dockerfile"
 ENTRYPOINT_PATH="$ROOT_DIR/docker/entrypoint.sh"
@@ -683,6 +684,125 @@ EOF
   assert_file_contains "$log_file" \
     'koalaman/shellcheck' \
     "an unusable shellcheck falls through to the container image"
+}
+
+# Give the doctor a host of its own: a podman that answers rootless, a
+# systemd that grants scopes, and a shellcheck that fails the way a mise
+# shim with no version does.
+make_doctor_bin() {
+  local dir="$1"
+  local tool=""
+
+  mkdir -p "$dir"
+  for tool in bash id uname grep; do
+    ln -sf "$(command -v "$tool")" "$dir/$tool"
+  done
+
+  cat >"$dir/docker" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
+  cat >"$dir/podman" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *OCIRuntime.Name*) printf 'runc\n' ;;
+  *Rootless*) printf 'true 2\n' ;;
+esac
+exit 0
+EOF
+
+  cat >"$dir/systemd-run" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
+  cat >"$dir/busctl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
+  cat >"$dir/shellcheck" <<'EOF'
+#!/usr/bin/env bash
+printf 'mise ERROR No version is set for shim: shellcheck\n' >&2
+exit 1
+EOF
+
+  chmod +x "$dir/docker" "$dir/podman" "$dir/systemd-run" \
+    "$dir/busctl" "$dir/shellcheck"
+}
+
+test_doctor_reports_each_backend_and_probes_by_running() {
+  local tdir="$TEST_TMPDIR/doctor"
+  local bin_dir="$tdir/bin"
+  local out_file="$tdir/out"
+  mkdir -p "$tdir"
+  make_doctor_bin "$bin_dir"
+
+  if ! bash -n "$DOCTOR_PATH"; then
+    fail "capsule-doctor.sh has valid shell syntax"
+  else
+    pass "capsule-doctor.sh has valid shell syntax"
+  fi
+
+  # The verdict depends on the host; the report does not.
+  PATH="$bin_dir" "$DOCTOR_PATH" >"$out_file" 2>&1 || true
+
+  assert_file_contains "$out_file" \
+    'Docker backend' \
+    "the doctor reports on the Docker backend"
+  assert_file_contains "$out_file" \
+    'podman backend' \
+    "the doctor reports on the podman backend"
+  assert_file_contains "$out_file" \
+    'Repository tooling' \
+    "the doctor reports on the repository's own linters"
+  assert_file_contains "$out_file" \
+    'systemd answers on the session bus' \
+    "the doctor probes the bus the container runtime resolves"
+  assert_file_contains "$out_file" \
+    'podman uses the runc runtime, not crun' \
+    "the doctor names a runtime that fails where crun does not"
+  assert_file_contains "$out_file" \
+    'shellcheck is on PATH but does not run' \
+    "the doctor tells an unrunnable shim from a missing tool"
+  assert_file_contains "$out_file" \
+    'passed,' \
+    "the doctor ends with a tally"
+}
+
+# The remedy has to fit the cause: a session bus that systemd is not on is a
+# different repair from having no user bus at all.
+test_doctor_names_a_stale_session_bus() {
+  local tdir="$TEST_TMPDIR/doctor-bus"
+  local bin_dir="$tdir/bin"
+  local out_file="$tdir/out"
+  local run_dir="$tdir/run"
+  mkdir -p "$tdir" "$run_dir"
+  make_doctor_bin "$bin_dir"
+  printf '#!/usr/bin/env bash\nexit 1\n' >"$bin_dir/busctl"
+  chmod +x "$bin_dir/busctl"
+  : >"$run_dir/bus"
+
+  PATH="$bin_dir" XDG_RUNTIME_DIR="$run_dir" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/dbus-Legacy" \
+    "$DOCTOR_PATH" >"$out_file" 2>&1 || true
+
+  assert_file_contains "$out_file" \
+    'systemd does not answer on the session bus' \
+    "the doctor fails a host whose session bus has no systemd on it"
+  assert_file_contains "$out_file" \
+    'DBUS_SESSION_BUS_ADDRESS skips' \
+    "the doctor blames the session bus address when that is the cause"
+
+  rm -f "$run_dir/bus"
+  PATH="$bin_dir" XDG_RUNTIME_DIR="$run_dir" \
+    DBUS_SESSION_BUS_ADDRESS="" \
+    "$DOCTOR_PATH" >"$out_file" 2>&1 || true
+
+  assert_file_contains "$out_file" \
+    'install dbus-user-session' \
+    "the doctor names the package when no user bus exists at all"
 }
 
 test_build_flag_without_runtime_args() {
@@ -2403,6 +2523,8 @@ main() {
   test_empty_optional_arrays_use_nounset_safe_expansion
   test_check_all_docker_linters_use_capsule_host_workdir
   test_check_all_ignores_an_unusable_linter
+  test_doctor_reports_each_backend_and_probes_by_running
+  test_doctor_names_a_stale_session_bus
   test_build_custom_flag_keeps_runtime_flags
   test_build_flag_without_runtime_args
   test_build_custom_flag_requires_custom_compose

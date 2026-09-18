@@ -24,6 +24,7 @@ common developer tools.
 - [Usage](#-usage)
 - [Capsule command examples](#%EF%B8%8F-capsule-command-examples)
 - [Additional features](#-additional-features)
+  - [Checking your environment](#checking-your-environment)
   - [Runtime backends: podman and Docker](#runtime-backends-podman-and-docker)
   - [UID and GID detection](#uid-and-gid-detection)
   - [Directory approval list](#directory-approval-list)
@@ -49,6 +50,9 @@ common developer tools.
   with a container engine of its own instead of the host daemon
   ([what it needs](#what-the-podman-backend-needs))
 - Access to Claude or Codex.
+
+Run [`./capsule-doctor.sh`](#checking-your-environment) to check all of this
+and get the command that repairs whatever is missing.
 
 ## 🚀 Initial setup
 
@@ -321,6 +325,25 @@ capsule -- --build true
 
 ## 🧩 Additional features
 
+### Checking your environment
+
+`capsule-doctor.sh` reports whether this host can run Capsule, and names the
+fix for whatever it cannot:
+
+```bash
+./capsule-doctor.sh
+```
+
+It covers both backends -- the Docker client, its compose plugin and daemon;
+podman's rootless mode, sub-id range, systemd user scopes, delegated cgroup
+controllers, OCI runtime and lingering, or the podman machine on macOS -- and
+the linters this repository's own checks reach for.
+
+A warning costs a capability and leaves the host usable. A failure means
+something that looks available cannot actually run, and the script exits
+non-zero on any failure, so a setup script can gate on it. Run it first
+whenever `capsule` fails in a way that looks environmental.
+
 ### Runtime backends: podman and Docker
 
 Capsule can start its container two ways. The Docker backend runs
@@ -381,15 +404,24 @@ Unlike the Docker backend, no AppArmor or sysctl change is needed on Ubuntu
 
 A build or run that dies with `Interactive authentication required`, on a
 scope request naming `system.slice` rather than `user.slice`, means the
-runtime could not reach your systemd user manager. One command settles it,
-run in the same shell where Capsule failed:
+runtime could not reach your systemd user manager. `crun` reports the same
+condition differently, as `sd-bus call: Process org.freedesktop.systemd1
+exited with status 1`: it reached a session bus that has no systemd on it and
+tried to activate one. One command settles either, run in the same shell
+where Capsule failed:
 
 ```bash
-systemd-run --user --scope --quiet true && echo "user scopes work"
+busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.DBus.Peer Ping
 ```
 
-That does what the container runtime does. If it fails, podman fails the
-same way, and the cause is one of the three pieces that have to line up:
+That asks the session bus for systemd the way the container runtime does. Do
+not trust `systemctl --user` or `systemd-run --user` here: both reach the
+user manager through `$XDG_RUNTIME_DIR/systemd/private` rather than through
+the bus, so they answer happily while the bus itself is wrong.
+
+If the probe fails, podman fails the same way, and the cause is one of the
+three pieces that have to line up:
 `pam_systemd` gives a login session `/run/user/$(id -u)` and a
 `user@$(id -u).service` manager; the `dbus-user-session` package puts the
 bus at `$XDG_RUNTIME_DIR/bus`; and clients use `$DBUS_SESSION_BUS_ADDRESS`
@@ -431,6 +463,43 @@ mkdir -p ~/.config/containers
 cat >> ~/.config/containers/containers.conf <<'EOF'
 [engine]
 cgroup_manager = "cgroupfs"
+EOF
+```
+
+Once the bus works, a container that still dies on `unable to get oom kill
+count` has a cgroup problem rather than a bus problem. systemd has to
+delegate the `memory` controller to your user manager:
+
+```bash
+cd "/sys/fs/cgroup/user.slice/user-$(id -u).slice"
+cat "user@$(id -u).service/cgroup.controllers"
+```
+
+`memory` has to appear in that list. When it does not, delegate it and log
+in again:
+
+```bash
+sudo mkdir -p /etc/systemd/system/user@.service.d
+printf '[Service]\nDelegate=cpu cpuset io memory pids\n' |
+  sudo tee /etc/systemd/system/user@.service.d/delegate.conf
+sudo systemctl daemon-reload
+```
+
+If the controller is delegated and containers still refuse to start, the OCI
+runtime is what is left. Recent `runc` releases turn a missing
+`memory.events` into a fatal error where `crun`, the runtime podman prefers,
+carries on. Install it, confirm it, then pin it:
+
+```bash
+sudo apt-get install -y crun
+podman --runtime crun run --rm alpine:3.20 echo ok
+```
+
+```bash
+mkdir -p ~/.config/containers
+cat >> ~/.config/containers/containers.conf <<'EOF'
+[engine]
+runtime = "crun"
 EOF
 ```
 
