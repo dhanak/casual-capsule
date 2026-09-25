@@ -54,7 +54,25 @@ log_stream() {
 
 # Run a command and capture its combined output in the timestamped logfile.
 run_logged() {
-  "$@" 2>&1 | log_stream
+  "$@" </dev/null 2>&1 | log_stream
+}
+
+# Resolve the approval path with Capsule's own workdir logic.
+resolve_approval_path() (
+  export CAPSULE_ROOT="$ROOT_DIR"
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/lib/capsule/common.sh"
+  export CAPSULE_WORKDIR="$1"
+  initialize_workdir_state
+  printf '%s\n' "$LOCAL_APPROVAL_PATH"
+)
+
+# Write one non-interactive Capsule approval using its daemon-visible path.
+write_approval_config() {
+  local config_file="$1"
+  local path="$2"
+
+  resolve_approval_path "$path" >"$config_file"
 }
 
 # Record a failed assertion and print it to stderr.
@@ -112,6 +130,33 @@ assert_file_not_contains() {
   else
     pass "$msg"
   fi
+}
+
+# Assert equality for path-resolution checks.
+assert_equals() {
+  local expected="$1"
+  local actual="$2"
+  local msg="$3"
+  if [[ "$expected" == "$actual" ]]; then
+    pass "$msg"
+  else
+    fail "$msg (expected=$expected actual=$actual)"
+  fi
+}
+
+# Verify E2E approvals use the same mapped path Capsule checks.
+test_approval_path_resolution() {
+  local mapped=""
+
+  mapped="$(
+    CAPSULE_HOST_WORKDIR='' \
+      CAPSULE_HOST_PATH_MAP='/workspace=/var/lib/docker/workspace' \
+      resolve_approval_path '/workspace/tests/fixtures/example-project'
+  )"
+  assert_equals \
+    '/var/lib/docker/workspace/tests/fixtures/example-project' \
+    "$mapped" \
+    "E2E approvals use daemon-visible host paths"
 }
 
 # Check whether Docker, Compose, and the daemon are available for e2e tests.
@@ -198,7 +243,7 @@ test_podman_backend_end_to_end() {
     "$EXAMPLE_PROJECT_DIR/check-env.sh" \
     "$EXAMPLE_PROJECT_DIR/fixture.txt" \
     "$workspace/"
-  printf '%s\n' "$workspace" >"$config_file"
+  write_approval_config "$config_file" "$workspace"
 
   # The inner engine has to answer, and the workspace has to be writable as
   # the caller: those are the two properties the backend exists for.
@@ -246,7 +291,7 @@ test_profile_end_to_end() {
     return
   fi
 
-  printf '%s\n' "$EXAMPLE_PROJECT_DIR" >"$config_file"
+  write_approval_config "$config_file" "$EXAMPLE_PROJECT_DIR"
   log_message "Building and running the Docker profile through both selectors"
   # shellcheck disable=SC2016
   if run_logged bash -c '
@@ -297,7 +342,7 @@ content = '''
 RUN true
 '''
 EOF
-  printf '%s\n' "$EXAMPLE_PROJECT_DIR" >"$config_file"
+  write_approval_config "$config_file" "$EXAMPLE_PROJECT_DIR"
   token="$(printf '%s\n' "$profile_dir" | cksum | cut -d' ' -f1)"
   printf -v token '%08x' "$token"
   image="casual-capsule-profile-unbuilt-e2e-${token}:local"
@@ -405,7 +450,7 @@ test_example_project_end_to_end() {
     return
   fi
 
-  printf '%s\n' "$EXAMPLE_PROJECT_DIR" >"$config_file"
+  write_approval_config "$config_file" "$EXAMPLE_PROJECT_DIR"
   printf '%s\n' "$token" >"$token_file"
   check_cmd="bash ./check-env.sh && grep -Fxq '$token' e2e-token.txt"
 
@@ -441,7 +486,7 @@ test_custom_compose_end_to_end() {
     return
   fi
 
-  printf '%s\n' "$EXAMPLE_PROJECT_DIR" >"$config_file"
+  write_approval_config "$config_file" "$EXAMPLE_PROJECT_DIR"
   # shellcheck disable=SC2016
   check_cmd='bash ./check-env.sh && [[ "${CUSTOM_CAPSULE_IMAGE:-}" == "1" ]]'
   check_cmd="$check_cmd && [[ \"\${CUSTOM_CAPSULE_COMPOSE:-}\" == \"1\" ]]"
@@ -480,7 +525,7 @@ test_custom_compose_build_custom_end_to_end() {
     return
   fi
 
-  printf '%s\n' "$EXAMPLE_PROJECT_DIR" >"$config_file"
+  write_approval_config "$config_file" "$EXAMPLE_PROJECT_DIR"
   # shellcheck disable=SC2016
   check_cmd='bash ./check-env.sh && [[ "${CUSTOM_CAPSULE_IMAGE:-}" == "1" ]]'
   check_cmd="$check_cmd && [[ \"\${CUSTOM_CAPSULE_COMPOSE:-}\" == \"1\" ]]"
@@ -506,6 +551,7 @@ test_custom_compose_build_custom_end_to_end() {
 # Run the suite, print the logfile path, and report the final summary.
 main() {
   log_message "Suite started"
+  test_approval_path_resolution
   test_example_project_end_to_end
   test_custom_compose_end_to_end
   test_custom_compose_build_custom_end_to_end
