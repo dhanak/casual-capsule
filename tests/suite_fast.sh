@@ -58,6 +58,9 @@ TEST_TMPDIR="$(mktemp -d)"
 # /private/var/folders/… — without this the path comparisons fail.
 TEST_TMPDIR="$(CDPATH='' cd -- "$TEST_TMPDIR" && pwd -P)"
 trap 'rm -rf "$TEST_TMPDIR"' EXIT
+export XDG_CACHE_HOME="$TEST_TMPDIR/cache"
+export XDG_CONFIG_HOME="$TEST_TMPDIR/config"
+PROFILE_CACHE_DIR="$XDG_CACHE_HOME/capsule/profiles"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -374,12 +377,15 @@ test_command_layout() {
 
 test_completion_subcommand() {
   local tdir="$TEST_TMPDIR/completion"
+  local config_home="$tdir/config"
+  local profile_home="$config_home/capsule/profiles"
+  local candidates_file="$tdir/candidates"
   local output_file="$tdir/output"
   local err_file="$tdir/err"
   local shell=""
   local marker=""
   local profile_marker=""
-  mkdir -p "$tdir"
+  mkdir -p "$profile_home/named-test" "$tdir/local-profile"
 
   for shell in bash zsh fish; do
     case "$shell" in
@@ -407,8 +413,27 @@ test_completion_subcommand() {
       else
         fail "generated Bash completion has valid syntax"
       fi
+      (
+        cd "$tdir"
+        XDG_CONFIG_HOME="$config_home" \
+          COMPLETION_FILE="$output_file" bash -c '
+            source "$COMPLETION_FILE"
+            COMP_WORDS=(capsule --profile "")
+            COMP_CWORD=2
+            _capsule
+            printf "%s\n" "${COMPREPLY[@]}"
+          '
+      ) >"$candidates_file"
+      assert_file_contains "$candidates_file" 'named-test' \
+        "Bash profile completion offers configured names"
+      assert_file_contains "$candidates_file" 'local-profile' \
+        "Bash profile completion retains directory paths"
     fi
     if [[ "$shell" == "zsh" ]]; then
+      assert_file_contains "$output_file" '_capsule_profiles()' \
+        "Zsh completion defines configured profile candidates"
+      assert_file_contains "$output_file" '_directories' \
+        "Zsh profile completion retains directory paths"
       assert_file_contains "$output_file" '_capsule_run_arguments()' \
         "Zsh completion defines default-run option candidates"
       assert_file_contains "$output_file" 'words[2]=()' \
@@ -424,6 +449,11 @@ test_completion_subcommand() {
         "Zsh completion treats an omitted subcommand as run"
     fi
     if [[ "$shell" == "fish" ]]; then
+      assert_file_contains "$output_file" \
+        'function __fish_capsule_profiles' \
+        "Fish completion defines configured profile candidates"
+      assert_file_contains "$output_file" '__fish_complete_directories' \
+        "Fish profile completion retains directory paths"
       assert_file_contains "$output_file" \
         'function __fish_capsule_using_run' \
         "Fish completion defines default-run detection"
@@ -1678,6 +1708,142 @@ test_run_confirmation_supports_only_once() {
   fi
 }
 
+test_default_config_uses_xdg_location() {
+  local tdir="$TEST_TMPDIR/xdg-config"
+  local config_home="$tdir/config"
+  local approval_file="$config_home/capsule/approved-directories"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  mkdir -p "$(dirname -- "$approval_file")"
+  make_mock_bin "$mock_bin"
+  printf '%s\n' "$ROOT_DIR" >"$approval_file"
+
+  if env -u CAPSULE_CONFIG XDG_CONFIG_HOME="$config_home" \
+    PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" \
+    CAPSULE_RUNTIME=docker DOCKER_GID=1111 \
+    "$SCRIPT_PATH" true; then
+    pass "default approval list uses XDG_CONFIG_HOME"
+  else
+    fail "default approval list uses XDG_CONFIG_HOME"
+  fi
+}
+
+test_relative_xdg_paths_are_rejected() {
+  local tdir="$TEST_TMPDIR/relative-xdg"
+  local project_dir="$tdir/project"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  local err_file="$tdir/err"
+  local variable=""
+  mkdir -p "$project_dir/.config/capsule"
+  make_mock_bin "$mock_bin"
+  printf '%s\n' "$project_dir" \
+    >"$project_dir/.config/capsule/approved-directories"
+
+  for variable in XDG_CONFIG_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR; do
+    : >"$err_file"
+    if (
+      cd "$project_dir"
+      env -u CAPSULE_CONFIG "$variable=.config" \
+        PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" \
+        CAPSULE_RUNTIME=docker DOCKER_GID=1111 \
+        "$SCRIPT_PATH" true
+    ) >"$tdir/out" 2>"$err_file"; then
+      fail "$variable rejects a relative path"
+    else
+      pass "$variable rejects a relative path"
+    fi
+    assert_file_contains "$err_file" \
+      "$variable must be an absolute path" \
+      "$variable explains its absolute-path requirement"
+  done
+}
+
+test_legacy_config_is_migrated() {
+  local tdir="$TEST_TMPDIR/legacy-config"
+  local home_dir="$tdir/home"
+  local legacy_path="$home_dir/.config/capsule"
+  local approval_file="$legacy_path/approved-directories"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  mkdir -p "$home_dir/.config"
+  make_mock_bin "$mock_bin"
+  printf '%s\n' "$ROOT_DIR" >"$legacy_path"
+
+  if env -u CAPSULE_CONFIG -u XDG_CONFIG_HOME HOME="$home_dir" \
+    PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" \
+    CAPSULE_RUNTIME=docker DOCKER_GID=1111 \
+    "$SCRIPT_PATH" true 2>"$tdir/err"; then
+    pass "legacy approval list remains usable after migration"
+  else
+    fail "legacy approval list remains usable after migration"
+  fi
+  assert_file_contains "$approval_file" "$ROOT_DIR" \
+    "legacy approval list moves under the config directory"
+}
+
+test_legacy_config_symlink_is_rejected() {
+  local tdir="$TEST_TMPDIR/legacy-config-symlink"
+  local home_dir="$tdir/home"
+  local legacy_path="$home_dir/.config/capsule"
+  local target_file="$home_dir/.config/approvals"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  local err_file="$tdir/err"
+  mkdir -p "$home_dir/.config"
+  make_mock_bin "$mock_bin"
+  printf '%s\n' "$ROOT_DIR" >"$target_file"
+  ln -s approvals "$legacy_path"
+
+  if env -u CAPSULE_CONFIG -u XDG_CONFIG_HOME HOME="$home_dir" \
+    PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" \
+    CAPSULE_RUNTIME=docker DOCKER_GID=1111 \
+    "$SCRIPT_PATH" true 2>"$err_file"; then
+    fail "legacy approval symlinks require manual migration"
+  else
+    pass "legacy approval symlinks require manual migration"
+  fi
+  assert_file_contains "$err_file" \
+    'replace legacy config symlink with a regular approval file' \
+    "legacy symlink reports actionable migration guidance"
+  if [[ -L "$legacy_path" ]]; then
+    pass "rejected legacy approval symlink remains in place"
+  else
+    fail "rejected legacy approval symlink remains in place"
+  fi
+  assert_file_contains "$target_file" "$ROOT_DIR" \
+    "rejected legacy approval symlink target remains unchanged"
+}
+
+test_legacy_config_migration_resumes() {
+  local tdir="$TEST_TMPDIR/legacy-config-resume"
+  local home_dir="$tdir/home"
+  local legacy_path="$home_dir/.config/capsule"
+  local recovery_file="${legacy_path}.migration"
+  local approval_file="$legacy_path/approved-directories"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  mkdir -p "$legacy_path"
+  make_mock_bin "$mock_bin"
+  printf '%s\n' "$ROOT_DIR" >"$recovery_file"
+
+  if env -u CAPSULE_CONFIG -u XDG_CONFIG_HOME HOME="$home_dir" \
+    PATH="$mock_bin:$PATH" MOCK_LOG="$log_file" \
+    CAPSULE_RUNTIME=docker DOCKER_GID=1111 \
+    "$SCRIPT_PATH" true 2>"$tdir/err"; then
+    pass "interrupted legacy approval migration resumes"
+  else
+    fail "interrupted legacy approval migration resumes"
+  fi
+  assert_file_contains "$approval_file" "$ROOT_DIR" \
+    "resumed migration restores the approval list"
+  if [[ ! -e "$recovery_file" ]]; then
+    pass "resumed migration consumes the recovery file"
+  else
+    fail "resumed migration consumes the recovery file"
+  fi
+}
+
 test_remote_flag_skips_local_workdir_approval() {
   local tdir="$TEST_TMPDIR/remote-no-local-approval"
   local mock_bin="$tdir/bin"
@@ -2509,7 +2675,7 @@ EOF
     CAPSULE_PROFILES="$profile_dir" DOCKER_GID=1111 \
       run_capsule "$mock_bin" "$log_file" --build true
   )
-  override_file="$ROOT_DIR/_build/profiles/"
+  override_file="$PROFILE_CACHE_DIR/"
   override_file+="$(profile_path_token "$profile_dir")/compose.yml"
 
   assert_file_contains "$log_file" '--env SAME_VALUE=same' \
@@ -2550,6 +2716,139 @@ EOF
   assert_file_contains "$override_file" \
     "- 'example.internal=192.0.2.10'" \
     "Docker profile writes its static host mapping"
+}
+
+test_profile_names_resolve_from_xdg_config() {
+  local tdir="$TEST_TMPDIR/profile-name"
+  local config_home="$tdir/config"
+  local profile_dir="$config_home/capsule/profiles/named-test"
+  local local_profile_dir="$tdir/named-test"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  local selector=""
+  local work_dir=""
+  mkdir -p "$profile_dir" "$local_profile_dir"
+  make_mock_bin "$mock_bin"
+
+  cat >"$profile_dir/capsule.toml" <<'EOF'
+version = 1
+name = "named-test"
+
+[env]
+NAMED_PROFILE = "enabled"
+EOF
+
+  cat >"$local_profile_dir/capsule.toml" <<'EOF'
+version = 1
+name = "local-test"
+
+[env]
+LOCAL_PROFILE = "enabled"
+EOF
+
+  (
+    cd "$tdir"
+    XDG_CONFIG_HOME="$config_home" CAPSULE_PROFILES=named-test \
+      DOCKER_GID=1111 run_capsule "$mock_bin" "$log_file" true
+  )
+
+  assert_file_contains "$log_file" '--env NAMED_PROFILE=enabled' \
+    "bare profile selectors resolve names from XDG_CONFIG_HOME"
+  assert_file_not_contains "$log_file" '--env LOCAL_PROFILE=enabled' \
+    "bare profile selectors ignore same-named working directories"
+
+  : >"$log_file"
+  (
+    cd "$tdir"
+    XDG_CONFIG_HOME="$config_home" CAPSULE_PROFILES=./named-test \
+      DOCKER_GID=1111 run_capsule "$mock_bin" "$log_file" true
+  )
+  assert_file_contains "$log_file" '--env LOCAL_PROFILE=enabled' \
+    "explicit relative paths select working-directory profiles"
+
+  mkdir -p "$local_profile_dir/child"
+  for selector in . ..; do
+    work_dir="$local_profile_dir"
+    if [[ "$selector" == ".." ]]; then
+      work_dir="$local_profile_dir/child"
+    fi
+    : >"$log_file"
+    (
+      cd "$work_dir"
+      CAPSULE_PROFILES="$selector" DOCKER_GID=1111 \
+        run_capsule "$mock_bin" "$log_file" true
+    )
+    assert_file_contains "$log_file" '--env LOCAL_PROFILE=enabled' \
+      "$selector selects an explicit profile path"
+  done
+}
+
+test_profile_names_fall_back_to_bundled_profiles() {
+  local tdir="$TEST_TMPDIR/profile-bundled-name"
+  local config_home="$tdir/config"
+  local user_profile="$config_home/capsule/profiles/nvidia"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  mkdir -p "$tdir"
+  make_mock_bin "$mock_bin"
+
+  XDG_CONFIG_HOME="$config_home" CAPSULE_PROFILES=nvidia \
+    DOCKER_GID=1111 run_capsule "$mock_bin" "$log_file" true
+  assert_file_contains "$log_file" \
+    "-f $ROOT_DIR/docker/compose-nvidia.yml" \
+    "profile names fall back to profiles shipped with Capsule"
+
+  mkdir -p "$user_profile"
+  cat >"$user_profile/capsule.toml" <<'EOF'
+version = 1
+name = "nvidia"
+
+[env]
+USER_NVIDIA_PROFILE = "enabled"
+EOF
+  : >"$log_file"
+  XDG_CONFIG_HOME="$config_home" CAPSULE_PROFILES=nvidia \
+    DOCKER_GID=1111 run_capsule "$mock_bin" "$log_file" true
+  assert_file_contains "$log_file" '--env USER_NVIDIA_PROFILE=enabled' \
+    "user profiles override same-named bundled profiles"
+  assert_file_not_contains "$log_file" 'compose-nvidia.yml' \
+    "overridden bundled profiles do not contribute settings"
+}
+
+test_duplicate_profile_directories_are_ignored() {
+  local tdir="$TEST_TMPDIR/profile-duplicate"
+  local profile_dir="$tdir/profile"
+  local mock_bin="$tdir/bin"
+  local log_file="$tdir/log"
+  local err_file="$tdir/err"
+  local occurrence_count=""
+  mkdir -p "$profile_dir"
+  make_mock_bin "$mock_bin"
+
+  cat >"$profile_dir/capsule.toml" <<'EOF'
+version = 1
+name = "duplicate-test"
+
+[env]
+DUPLICATE_PROFILE = "enabled"
+EOF
+
+  if CAPSULE_PROFILES="$profile_dir" DOCKER_GID=1111 \
+    run_capsule "$mock_bin" "$log_file" \
+    --profile "$profile_dir/." true 2>"$err_file"; then
+    pass "duplicate profile directories do not fail"
+  else
+    fail "duplicate profile directories do not fail"
+  fi
+  assert_file_contains "$err_file" \
+    "ignoring duplicate profile directory: $profile_dir" \
+    "duplicate profile directories emit a warning"
+  occurrence_count="$(
+    grep -Fo -- '--env DUPLICATE_PROFILE=enabled' "$log_file" | \
+      wc -l | tr -d ' '
+  )"
+  assert_equals 1 "$occurrence_count" \
+    "duplicate profile directories apply only once"
 }
 
 test_profile_volumes_use_host_path_map() {
@@ -2682,7 +2981,7 @@ test_profile_custom_build_generates_ordered_image() {
     build --custom --profile "$PROFILE_CAPSULE_DIR"
 
   token="$(profile_path_token "$PROFILE_CAPSULE_DIR")"
-  generated_file="$ROOT_DIR/_build/profiles/$token/Dockerfile"
+  generated_file="$PROFILE_CACHE_DIR/$token/Dockerfile"
   if [[ "${#token}" -eq 8 && "$token" != *[!0-9a-f]* ]]; then
     pass "profile image token is fixed-width lowercase hexadecimal"
   else
@@ -2743,7 +3042,7 @@ EOF
     "--tag casual-capsule-profile-first-second-$forward_token:local" \
     "profile image names preserve selected profile order"
   assert_file_contains \
-    "$ROOT_DIR/_build/profiles/$forward_token/Dockerfile" \
+    "$PROFILE_CACHE_DIR/$forward_token/Dockerfile" \
     $'# profile: first\nENV PROFILE_ORDER=first\n\n# profile: second' \
     "profile fragments retain command-line order"
 
@@ -2760,7 +3059,7 @@ EOF
     fail "reversing profiles selects a distinct image tag"
   fi
   assert_file_contains \
-    "$ROOT_DIR/_build/profiles/$reverse_token/Dockerfile" \
+    "$PROFILE_CACHE_DIR/$reverse_token/Dockerfile" \
     $'# profile: second\nENV PROFILE_ORDER=second\n\n# profile: first' \
     "reversing profiles reverses generated instructions"
 }
@@ -2846,7 +3145,7 @@ test_profiles_conflict_with_custom_compose() {
     "profile and custom Compose conflict reports a clear error"
 }
 
-test_profile_option_rejects_empty_directory() {
+test_profile_option_rejects_empty_selector() {
   local tdir="$TEST_TMPDIR/profile-empty-option"
   local mock_bin="$tdir/bin"
   local log_file="$tdir/log"
@@ -2860,7 +3159,8 @@ test_profile_option_rejects_empty_directory() {
   else
     pass "an empty --profile value is rejected"
   fi
-  assert_file_contains "$err_file" '--profile requires a directory' \
+  assert_file_contains "$err_file" \
+    '--profile requires a name or directory path' \
     "empty profile option reports a clear error"
 }
 
@@ -3049,16 +3349,43 @@ test_podman_backend_translates_publish_and_volume() {
 
 test_podman_backend_mounts_the_token_secret() {
   setup_mock_case podman-secret
+  mkdir -p "$CASE_DIR/run"
 
-  CAPSULE_RUNTIME=podman GITHUB_API_TOKEN=token-value \
+  XDG_RUNTIME_DIR="$CASE_DIR/run" MOCK_UNAME=Linux \
+    CAPSULE_RUNTIME=podman GITHUB_API_TOKEN=token-value \
     run_capsule "$CASE_BIN" "$CASE_LOG" true
 
+  assert_podman_args_contain "$CASE_LOG" \
+    "$CASE_DIR/run/capsule/github_api_token." \
+    "podman secrets use XDG_RUNTIME_DIR on Linux"
   assert_podman_args_contain "$CASE_LOG" \
     ':/run/secrets/github_api_token:ro' \
     "podman backend mounts the token where the entrypoint reads it"
   assert_podman_args_lack "$CASE_LOG" \
     'token-value' \
     "podman backend passes the token as a file, never on a command line"
+
+  : >"$CASE_LOG"
+  XDG_RUNTIME_DIR='' XDG_CACHE_HOME="$CASE_DIR/cache" \
+    MOCK_UNAME=Linux CAPSULE_RUNTIME=podman \
+    GITHUB_API_TOKEN=token-value \
+    run_capsule "$CASE_BIN" "$CASE_LOG" true
+  assert_podman_args_contain "$CASE_LOG" \
+    "$CASE_DIR/cache/capsule/runtime/github_api_token." \
+    "podman secrets use XDG cache without a runtime directory"
+
+  : >"$CASE_LOG"
+  mkdir -p "$CASE_DIR/home/project"
+  HOME="$CASE_DIR/home" XDG_CACHE_HOME="$CASE_DIR/outside-cache" \
+    CAPSULE_WORKDIR="$CASE_DIR/home/project" MOCK_UNAME=Darwin \
+    CAPSULE_RUNTIME=podman \
+    GITHUB_API_TOKEN=token-value \
+    run_capsule "$CASE_BIN" "$CASE_LOG" true
+  assert_podman_args_contain "$CASE_LOG" \
+    "$CASE_DIR/home/.cache/capsule/runtime/github_api_token." \
+    "macOS podman secrets remain under the shared home"
+  assert_podman_args_lack "$CASE_LOG" "$CASE_DIR/outside-cache" \
+    "macOS podman secrets ignore cache paths outside the shared home"
 }
 
 test_podman_host_docker_is_opt_in() {
@@ -3662,6 +3989,11 @@ main() {
   test_list_rejects_launch_commands
   test_remote_flag_requires_authorization
   test_run_confirmation_supports_only_once
+  test_default_config_uses_xdg_location
+  test_relative_xdg_paths_are_rejected
+  test_legacy_config_is_migrated
+  test_legacy_config_symlink_is_rejected
+  test_legacy_config_migration_resumes
   test_remote_flag_skips_local_workdir_approval
   test_remote_flag_builds_and_runs_over_ssh
   test_remote_flag_accepts_host_port_syntax
@@ -3695,6 +4027,9 @@ main() {
   test_macos_staff_gid_override
   test_default_gid_when_detection_fails
   test_profile_runtime_settings
+  test_profile_names_resolve_from_xdg_config
+  test_profile_names_fall_back_to_bundled_profiles
+  test_duplicate_profile_directories_are_ignored
   test_profile_volumes_use_host_path_map
   test_profile_home_volume_uses_remote_home
   test_profile_home_volume_rejects_missing_remote_home
@@ -3703,7 +4038,7 @@ main() {
   test_profile_build_preserves_selected_order
   test_profile_rejects_unsupported_toml
   test_profiles_conflict_with_custom_compose
-  test_profile_option_rejects_empty_directory
+  test_profile_option_rejects_empty_selector
   test_podman_backend_runs_container_with_keep_id
   test_podman_profile_runtime_settings
   test_nested_capsule_podman_uses_local_workdir

@@ -316,6 +316,32 @@ validate_profile_fragment() {
   fi
 }
 
+# Resolve an explicit path, user profile name, or bundled profile name.
+resolve_profile_dir() {
+  local requested="$1"
+  local named_profile=""
+
+  if [[ "$requested" == */* || "$requested" == "." || \
+    "$requested" == ".." ]]; then
+    if [[ ! -d "$requested" ]]; then
+      die "profile directory not found: $requested"
+    fi
+    printf '%s\n' "$requested"
+    return 0
+  fi
+  if [[ "$requested" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+    for named_profile in \
+      "$CAPSULE_PROFILE_HOME/$requested" \
+      "$CAPSULE_ROOT/profiles/$requested"; do
+      if [[ -d "$named_profile" ]]; then
+        printf '%s\n' "$named_profile"
+        return
+      fi
+    done
+  fi
+  die "profile name not found: $requested"
+}
+
 # Parse and merge one profile directory.
 parse_profile() {
   local requested_dir="$1"
@@ -347,10 +373,13 @@ parse_profile() {
   local profile_publishes=()
   local profile_hosts=()
 
-  if [[ ! -d "$requested_dir" ]]; then
-    die "profile directory not found: $requested_dir"
-  fi
+  requested_dir="$(resolve_profile_dir "$requested_dir")"
   profile_dir="$(CDPATH='' cd -- "$requested_dir" && pwd -P)"
+  if profile_array_contains "$profile_dir" \
+    ${PROFILE_DIRS[@]+"${PROFILE_DIRS[@]}"}; then
+    warn "ignoring duplicate profile directory: $profile_dir"
+    return
+  fi
   profile_file="$profile_dir/capsule.toml"
   if [[ ! -f "$profile_file" || ! -r "$profile_file" ]]; then
     die "profile file is not readable: $profile_file"
@@ -601,7 +630,8 @@ configure_profiles() {
   local profile_path=""
 
   for profile_path in ${PROFILE_PATHS[@]+"${PROFILE_PATHS[@]}"}; do
-    [[ -n "$profile_path" ]] || die '--profile requires a directory'
+    [[ -n "$profile_path" ]] || \
+      die '--profile requires a name or directory path'
     parse_profile "$profile_path"
   done
 }
@@ -634,6 +664,7 @@ profile_set_token() {
 
 # Create the generated Dockerfile and Compose image override.
 generate_profile_build_files() {
+  local cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
   local token=""
   local profile_names=""
   local index=0
@@ -643,7 +674,7 @@ generate_profile_build_files() {
     return 0
   fi
   token="$(profile_set_token)"
-  PROFILE_BUILD_DIR="$SCRIPT_DIR/_build/profiles/$token"
+  PROFILE_BUILD_DIR="$cache_home/capsule/profiles/$token"
   PROFILE_DOCKERFILE="$PROFILE_BUILD_DIR/Dockerfile"
   PROFILE_EMPTY_CONTEXT="$PROFILE_BUILD_DIR/context"
   PROFILE_COMPOSE_OVERRIDE="$PROFILE_BUILD_DIR/compose.yml"

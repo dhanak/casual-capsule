@@ -11,8 +11,20 @@ EOF
 
 bash_completion() {
   cat <<'EOF'
+_capsule_profile_names() {
+  local name path profile_home
+
+  profile_home="${XDG_CONFIG_HOME:-$HOME/.config}/capsule/profiles"
+  for path in "$profile_home"/*; do
+    [[ -d "$path" ]] || continue
+    name=${path##*/}
+    [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || continue
+    printf '%s\n' "$name"
+  done
+}
+
 _capsule() {
-  local command cur options prev values
+  local command cur options prev value values
 
   COMPREPLY=()
   cur=${COMP_WORDS[COMP_CWORD]}
@@ -35,7 +47,16 @@ _capsule() {
       COMPREPLY=($(compgen -W 'auto docker podman' -- "$cur"))
       return
       ;;
-    --profile|--remote|--publish|--volume)
+    --profile)
+      while IFS= read -r value; do
+        COMPREPLY+=("$value")
+      done < <(compgen -W "$(_capsule_profile_names)" -- "$cur")
+      while IFS= read -r value; do
+        COMPREPLY+=("$value")
+      done < <(compgen -d -- "$cur")
+      return
+      ;;
+    --remote|--publish|--volume)
       return
       ;;
   esac
@@ -79,11 +100,26 @@ zsh_completion() {
   cat <<'EOF'
 #compdef capsule
 
+_capsule_profiles() {
+  local name profile profile_home
+  local -a names
+
+  profile_home=${XDG_CONFIG_HOME:-$HOME/.config}/capsule/profiles
+  for profile in "$profile_home"/*(N/); do
+    name=${profile:t}
+    [[ "$name" == [a-z0-9]* ]] || continue
+    [[ "$name" != *[^a-z0-9-]* ]] || continue
+    names+=("$name")
+  done
+  (( ${#names} )) && _describe 'profile name' names
+  _directories
+}
+
 _capsule_run_arguments() {
   _arguments \
     '(-b --build)'{-b,--build}'[build before running]' \
     '(-p --private-home)'{-p,--private-home}'[use private home]' \
-    '*--profile[apply a profile]:profile directory:_directories' \
+    '*--profile[apply a profile]:profile name or path:_capsule_profiles' \
     '--publish[map a port]:port mapping:' \
     '(-r --remote)'{-r,--remote}'[run remotely]:remote target:' \
     '--runtime[select runtime]:runtime:(auto docker podman)' \
@@ -127,7 +163,7 @@ _capsule() {
         '--all[build base and configured custom image]' \
         '--custom[build only the configured custom image]' \
         '--no-cache[disable build cache]' \
-        '*--profile[apply a profile]:profile directory:_directories' \
+        '*--profile[apply a profile]:profile name or path:_capsule_profiles' \
         '(-r --remote)'{-r,--remote}'[build remotely]:remote target:' \
         '--runtime[select runtime]:runtime:(auto docker podman)' \
         '(-h --help)'{-h,--help}'[show help]'
@@ -157,6 +193,22 @@ EOF
 
 fish_completion() {
   cat <<'EOF'
+function __fish_capsule_profiles
+  set -l config_home "$HOME/.config"
+  if set -q XDG_CONFIG_HOME; and test -n "$XDG_CONFIG_HOME"
+    set config_home "$XDG_CONFIG_HOME"
+  end
+  set -l profile_home "$config_home/capsule/profiles"
+  if test -d "$profile_home"
+    for profile in "$profile_home"/*
+      test -d "$profile"; or continue
+      set -l name (string replace -r '^.*/' '' -- "$profile")
+      string match -qr '^[a-z0-9][a-z0-9-]*$' -- "$name"; or continue
+      echo "$name"
+    end
+  end
+end
+
 function __fish_capsule_using_run
   set -l words (commandline -opc)
   if test (count $words) -lt 2
@@ -182,7 +234,8 @@ complete -c capsule -n '__fish_use_subcommand' -a completion \
 complete -c capsule -n '__fish_capsule_using_run' -s b -l build
 complete -c capsule -n '__fish_capsule_using_run' -s p \
   -l private-home
-complete -c capsule -n '__fish_capsule_using_run' -l profile -r
+complete -c capsule -n '__fish_capsule_using_run' -l profile -r \
+  -a '(__fish_capsule_profiles) (__fish_complete_directories)'
 complete -c capsule -n '__fish_capsule_using_run' -l publish -r
 complete -c capsule -n '__fish_capsule_using_run' -s r -l remote -r
 complete -c capsule -n '__fish_capsule_using_run' -l runtime -r \
@@ -195,7 +248,8 @@ complete -c capsule -n '__fish_capsule_using_run' -l no-cache
 complete -c capsule -n '__fish_seen_subcommand_from build' -l all
 complete -c capsule -n '__fish_seen_subcommand_from build' -l custom
 complete -c capsule -n '__fish_seen_subcommand_from build' -l no-cache
-complete -c capsule -n '__fish_seen_subcommand_from build' -l profile -r
+complete -c capsule -n '__fish_seen_subcommand_from build' -l profile -r \
+  -a '(__fish_capsule_profiles) (__fish_complete_directories)'
 complete -c capsule -n '__fish_seen_subcommand_from build' -s r -l remote -r
 complete -c capsule -n '__fish_seen_subcommand_from build' -l runtime -r \
   -a 'auto docker podman'
