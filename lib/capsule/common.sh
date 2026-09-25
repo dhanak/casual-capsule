@@ -1501,6 +1501,36 @@ run_requested_builds() {
   fi
 }
 
+# Print the command that builds the selected Docker profile image.
+docker_profile_build_command() {
+  local command="capsule build"
+  local profile_dir=""
+  local quoted=""
+
+  for profile_dir in ${PROFILE_DIRS[@]+"${PROFILE_DIRS[@]}"}; do
+    printf -v quoted '%q' "$profile_dir"
+    command="$command --profile $quoted"
+  done
+  command="$command --runtime docker"
+  if [[ -n "$REMOTE_SSH_DEST" ]]; then
+    printf -v quoted '%q' "$REMOTE_SSH_DEST"
+    command="$command --remote $quoted"
+  fi
+  printf '%s\n' "$command"
+}
+
+# Refuse to let Compose fall back to the base image for a profile runtime.
+require_docker_profile_image() {
+  [[ "$PROFILE_HAS_FRAGMENT" -eq 1 ]] || return 0
+
+  if docker image inspect "$PROFILE_IMAGE" >/dev/null 2>&1; then
+    return
+  fi
+
+  die "profile image ${PROFILE_IMAGE} is not built; run:" \
+    "$(docker_profile_build_command)"
+}
+
 # Exec the runtime container, preserving any user-supplied command.
 run_capsule_runtime() {
   exec "${COMPOSE_CMD[@]}" run --rm \
@@ -1566,5 +1596,6 @@ main() {
     return
   fi
 
+  require_docker_profile_image
   run_capsule_runtime
 }

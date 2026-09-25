@@ -159,6 +159,12 @@ if [[ "${1:-}" == "inspect" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "image" ]] && [[ "${2:-}" == "inspect" ]]; then
+  printf 'DOCKER_IMAGE_INSPECT_ARGS=%s\n' "$*" \
+    >>"${MOCK_LOG:?MOCK_LOG is required}"
+  exit "${MOCK_DOCKER_NO_IMAGE:-0}"
+fi
+
 if [[ "${1:-}" == "compose" ]]; then
   {
     printf 'ENV_DOCKER_GID=%s\n' "${DOCKER_GID:-}"
@@ -3005,6 +3011,56 @@ test_profile_custom_build_generates_ordered_image() {
     "generated Dockerfile contains profile instructions"
 }
 
+test_docker_profile_runtime_requires_the_selected_image() {
+  local tdir="$TEST_TMPDIR/profile-docker-image"
+  local mock_bin="$tdir/bin"
+  local cli_log="$tdir/cli-log"
+  local env_log="$tdir/env-log"
+  local err_file="$tdir/err"
+  local cli_image=""
+  local env_image=""
+  local token=""
+  local selected_image=""
+  mkdir -p "$tdir"
+  make_mock_bin "$mock_bin"
+
+  token="$(profile_path_token "$PROFILE_CAPSULE_DIR")"
+  selected_image="casual-capsule-profile-test-profile-${token}:local"
+
+  DOCKER_GID=1111 run_capsule "$mock_bin" "$cli_log" \
+    --profile "$PROFILE_CAPSULE_DIR" true
+  cli_image="$(value_from_log DOCKER_IMAGE_INSPECT_ARGS "$cli_log")"
+  assert_equals "image inspect $selected_image" "$cli_image" \
+    "Docker checks the exact selected profile image"
+  assert_file_contains "$cli_log" \
+    "-f $PROFILE_CACHE_DIR/$token/compose.yml" \
+    "Docker runtime includes the selected profile image override"
+  assert_file_contains "$PROFILE_CACHE_DIR/$token/compose.yml" \
+    "image: $selected_image" \
+    "profile override names the exact selected image"
+  assert_file_contains "$cli_log" ' run --rm ' \
+    "Docker runs a selected profile image after finding it"
+
+  CAPSULE_PROFILES="$PROFILE_CAPSULE_DIR" DOCKER_GID=1111 \
+    run_capsule "$mock_bin" "$env_log" true
+  env_image="$(value_from_log DOCKER_IMAGE_INSPECT_ARGS "$env_log")"
+  assert_equals "$cli_image" "$env_image" \
+    "CLI and environment profiles select the same Docker image"
+
+  if MOCK_DOCKER_NO_IMAGE=1 DOCKER_GID=1111 \
+    run_capsule "$mock_bin" "$tdir/missing-log" \
+    --profile "$PROFILE_CAPSULE_DIR" true 2>"$err_file"; then
+    fail "Docker refuses to run an unbuilt profile image"
+  else
+    pass "Docker refuses to run an unbuilt profile image"
+  fi
+  assert_file_contains "$err_file" \
+    "capsule build --profile $PROFILE_CAPSULE_DIR --runtime docker" \
+    "missing Docker profile image names the exact build command"
+  assert_file_not_contains "$tdir/missing-log" ' run --rm ' \
+    "missing Docker profile image fails before container creation"
+}
+
 test_profile_build_preserves_selected_order() {
   local tdir="$TEST_TMPDIR/profile-order"
   local first_dir="$tdir/first"
@@ -3062,6 +3118,20 @@ EOF
     "$PROFILE_CACHE_DIR/$reverse_token/Dockerfile" \
     $'# profile: second\nENV PROFILE_ORDER=second\n\n# profile: first' \
     "reversing profiles reverses generated instructions"
+
+  : >"$log_file"
+  CAPSULE_PROFILES="$first_dir;$second_dir" DOCKER_GID=1111 \
+    run_capsule "$mock_bin" "$log_file" true
+  assert_file_contains "$log_file" \
+    "image inspect casual-capsule-profile-first-second-$forward_token:local" \
+    "Docker runtime checks the exact ordered profile image"
+
+  : >"$log_file"
+  CAPSULE_PROFILES="$second_dir;$first_dir" DOCKER_GID=1111 \
+    run_capsule "$mock_bin" "$log_file" true
+  assert_file_contains "$log_file" \
+    "image inspect casual-capsule-profile-second-first-$reverse_token:local" \
+    "reversed profiles check their distinct Docker image"
 }
 
 test_profile_rejects_unsupported_toml() {
@@ -4035,6 +4105,7 @@ main() {
   test_profile_home_volume_rejects_missing_remote_home
   test_remote_profile_volume_source_rules
   test_profile_custom_build_generates_ordered_image
+  test_docker_profile_runtime_requires_the_selected_image
   test_profile_build_preserves_selected_order
   test_profile_rejects_unsupported_toml
   test_profiles_conflict_with_custom_compose
